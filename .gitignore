@@ -1,0 +1,19 @@
+# Build results
+bin/
+obj/
+
+# User-specific files
+.vs/
+.vscode/
+*.user
+*.suo
+*.rsuser
+
+# Logs and temporary files
+*.log
+TestResults/
+artifacts/
+
+# Environment/local secrets
+.env
+appsettings.Local.json
