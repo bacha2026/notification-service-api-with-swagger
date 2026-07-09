@@ -7,5 +7,5 @@
 - Order status updates track order, payment, fulfillment, and delivery statuses independently.
 - Notification CRUD endpoints support create, read, update, and delete operations.
 - Database seed data includes products, cart items, orders, order items, and notification records for bmacha2015@gmail.com and bmacha2026@gmail.com.
-- The API creates NotificationServiceDb automatically on startup when the database is missing.
+- The API creates or updates NotificationServiceDb on startup through EF Core migrations.
 - OpenAPI 3.0 is exposed through Swashbuckle at /swagger with XML endpoint comments.
