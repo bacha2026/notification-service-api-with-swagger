@@ -12,7 +12,7 @@
 - Notification CRUD endpoints support create, read, update, and delete operations.
 - Notification creation, updates, required-field validation, and sent-state changes are owned by the Notification domain entity.
 - Controllers contain endpoint routing and HTTP response shaping while application services handle persistence, DTO mapping, and workflow coordination.
-- Email notifications are logged by LoggingEmailSender and sent through the Gmail SMTP infrastructure sender when SmtpEmail settings are configured.
+- Email notifications are logged by LoggingEmailSender; no external email provider is configured.
 - Database seed data includes products, cart items, orders, order items, and notification records for bmacha2015@gmail.com and bmacha2026@gmail.com.
 - The API creates or updates NotificationServiceDb on startup through EF Core migrations.
 - OpenAPI 3.0 is exposed through Swashbuckle at /swagger with XML endpoint comments.

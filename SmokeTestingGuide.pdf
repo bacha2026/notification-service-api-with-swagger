@@ -9,7 +9,7 @@ endobj
 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
 endobj
 4 0 obj
-<< /Length 2582 >>
+<< /Length 2534 >>
 stream
 BT
 /F1 10 Tf
@@ -23,7 +23,7 @@ T*
 T*
 (Verify the application from startup through product, cart, order, notification, repository) Tj
 T*
-(persistence, and Gmail SMTP email sending.) Tj
+(persistence, and logged email notification output.) Tj
 T*
 (Run these steps in order after pulling the latest code.) Tj
 T*
@@ -43,7 +43,9 @@ T*
 T*
 (- Repositories use NotificationDbContext for queries, add/remove operations, and SaveChanges.) Tj
 T*
-(- LoggingEmailSender logs first, then delegates to GmailSmtpEmailSender for real email delivery.) Tj
+(- LoggingEmailSender logs email notification details only. No external email provider is) Tj
+T*
+(configured.) Tj
 T*
 () Tj
 T*
@@ -51,11 +53,9 @@ T*
 T*
 (1. SQL Server is available for the NotificationServiceDb connection string in appsettings.json.) Tj
 T*
-(2. Gmail SMTP settings are configured before testing real email delivery.) Tj
+(2. The test recipient addresses in appsettings.json are valid strings for workflow testing.) Tj
 T*
-(   Required SmtpEmail values: UserName, Password, FromAddress. Use a Gmail App Password.) Tj
-T*
-(3. The test recipient addresses in appsettings.json are valid for your environment.) Tj
+(3. Console/application logs are visible so logged email notification details can be inspected.) Tj
 T*
 () Tj
 T*
@@ -119,7 +119,7 @@ endobj
 << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 4 0 R >>
 endobj
 6 0 obj
-<< /Length 2888 >>
+<< /Length 2900 >>
 stream
 BT
 /F1 10 Tf
@@ -219,7 +219,7 @@ T*
 T*
 (INotificationRepository.) Tj
 T*
-(Email behavior: LoggingEmailSender logs, then GmailSmtpEmailSender sends through) Tj
+(Email behavior: LoggingEmailSender logs recipient, subject, and body. No real email is sent.) Tj
 T*
 ET
 
@@ -229,14 +229,12 @@ endobj
 << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 6 0 R >>
 endobj
 8 0 obj
-<< /Length 2705 >>
+<< /Length 2692 >>
 stream
 BT
 /F1 10 Tf
 50 750 Td
 14 TL
-(smtp.gmail.com:587 when SmtpEmail is configured.) Tj
-T*
 () Tj
 T*
 (Step 11 - Verify order history and order detail) Tj
@@ -265,7 +263,7 @@ T*
 T*
 (Domain behavior: Order.UpdateStatuses owns the status state changes.) Tj
 T*
-(Notification behavior: admin and visitor status-update notifications are created and emailed.) Tj
+(Notification behavior: admin and visitor status-update notifications are created and logged.) Tj
 T*
 () Tj
 T*
@@ -305,17 +303,15 @@ T*
 T*
 () Tj
 T*
-(Step 15 - Verify email delivery) Tj
+(Step 15 - Verify logged email output) Tj
 T*
-(Check application logs for queued and sent email messages from LoggingEmailSender.) Tj
+(Check application logs for messages from LoggingEmailSender.) Tj
 T*
-(Check the Gmail inboxes for the admin and visitor recipients if real SMTP credentials were) Tj
+(Expected: logs include recipient, subject, and body for order-created and status-updated) Tj
 T*
-(configured.) Tj
+(notifications.) Tj
 T*
-(If SmtpEmail settings are incomplete, email sending should fail fast with an SMTP configuration) Tj
-T*
-(error.) Tj
+(No external inbox should receive an email because the current email sender is logging-only.) Tj
 T*
 () Tj
 T*
@@ -331,6 +327,10 @@ T*
 T*
 () Tj
 T*
+(Step 17 - Repository wiring check) Tj
+T*
+(Confirm Program.cs registers:) Tj
+T*
 ET
 
 endstream
@@ -339,16 +339,12 @@ endobj
 << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 8 0 R >>
 endobj
 10 0 obj
-<< /Length 625 >>
+<< /Length 547 >>
 stream
 BT
 /F1 10 Tf
 50 750 Td
 14 TL
-(Step 17 - Repository wiring check) Tj
-T*
-(Confirm Program.cs registers:) Tj
-T*
 (- ICartRepository -> CartRepository) Tj
 T*
 (- IOrderRepository -> OrderRepository) Tj
@@ -365,7 +361,7 @@ T*
 T*
 (The app starts, Swagger loads, repositories resolve, the product/cart/order workflow succeeds,) Tj
 T*
-(notifications are persisted, and configured Gmail SMTP email is sent.) Tj
+(notifications are persisted, and notification email details are logged.) Tj
 T*
 ET
 
@@ -381,15 +377,15 @@ xref
 0000000058 00000 n 
 0000000136 00000 n 
 0000000206 00000 n 
-0000002840 00000 n 
-0000002966 00000 n 
-0000005906 00000 n 
-0000006032 00000 n 
-0000008789 00000 n 
-0000008915 00000 n 
-0000009592 00000 n 
+0000002792 00000 n 
+0000002918 00000 n 
+0000005870 00000 n 
+0000005996 00000 n 
+0000008740 00000 n 
+0000008866 00000 n 
+0000009465 00000 n 
 trailer
 << /Size 12 /Root 1 0 R >>
 startxref
-9720
+9593
 %%EOF
