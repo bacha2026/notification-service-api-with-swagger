@@ -1,0 +1,395 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [ 5 0 R 7 0 R 9 0 R 11 0 R ] /Count 4 >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+4 0 obj
+<< /Length 2582 >>
+stream
+BT
+/F1 10 Tf
+50 750 Td
+14 TL
+(Notification Service API - Smoke Testing Guide) Tj
+T*
+() Tj
+T*
+(Purpose) Tj
+T*
+(Verify the application from startup through product, cart, order, notification, repository) Tj
+T*
+(persistence, and Gmail SMTP email sending.) Tj
+T*
+(Run these steps in order after pulling the latest code.) Tj
+T*
+() Tj
+T*
+(Current architecture checkpoint) Tj
+T*
+(- Controllers are thin and only shape HTTP responses.) Tj
+T*
+(- Services coordinate workflows and map DTOs.) Tj
+T*
+(- Domain entities own business rules and state changes.) Tj
+T*
+(- Persistence/Interfaces contains repository contracts.) Tj
+T*
+(- Persistence/Concrete contains EF Core repository implementations.) Tj
+T*
+(- Repositories use NotificationDbContext for queries, add/remove operations, and SaveChanges.) Tj
+T*
+(- LoggingEmailSender logs first, then delegates to GmailSmtpEmailSender for real email delivery.) Tj
+T*
+() Tj
+T*
+(Prerequisites) Tj
+T*
+(1. SQL Server is available for the NotificationServiceDb connection string in appsettings.json.) Tj
+T*
+(2. Gmail SMTP settings are configured before testing real email delivery.) Tj
+T*
+(   Required SmtpEmail values: UserName, Password, FromAddress. Use a Gmail App Password.) Tj
+T*
+(3. The test recipient addresses in appsettings.json are valid for your environment.) Tj
+T*
+() Tj
+T*
+(Step 1 - Start the app) Tj
+T*
+(Command: dotnet run) Tj
+T*
+(Expected: The app starts without errors, EF Core applies pending migrations, DI resolves) Tj
+T*
+(services and repositories, and Swagger is available.) Tj
+T*
+(Open: https://localhost:<port>/swagger or http://localhost:<port>/swagger using the port shown) Tj
+T*
+(in the console.) Tj
+T*
+() Tj
+T*
+(Step 2 - Verify Swagger loads) Tj
+T*
+(Request: GET /swagger) Tj
+T*
+(Expected: Swagger UI opens and lists Products, Cart, Orders, and Notifications endpoints.) Tj
+T*
+() Tj
+T*
+(Step 3 - Verify product catalog) Tj
+T*
+(Request: GET /api/products) Tj
+T*
+(Expected: 200 OK with product records containing id, name, shortDescription, description, price,) Tj
+T*
+(quantityAvailable, and imageUrl.) Tj
+T*
+(Repository path: ProductsController -> ProductService -> IProductRepository -> ProductRepository) Tj
+T*
+(-> NotificationDbContext.) Tj
+T*
+() Tj
+T*
+(Step 4 - Verify product detail) Tj
+T*
+(Request: GET /api/products/1) Tj
+T*
+(Expected: 200 OK with one product. If id does not exist, expect 404 Not Found.) Tj
+T*
+() Tj
+T*
+(Step 5 - Create a product) Tj
+T*
+(Request: POST /api/products) Tj
+T*
+(Body example:) Tj
+T*
+({ "name": "Smoke Test Product", "shortDescription": "Created during smoke test", "description":) Tj
+T*
+ET
+
+endstream
+endobj
+5 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 4 0 R >>
+endobj
+6 0 obj
+<< /Length 2888 >>
+stream
+BT
+/F1 10 Tf
+50 750 Td
+14 TL
+("Temporary product for end-to-end validation", "price": 99.00, "quantityAvailable": 10,) Tj
+T*
+("imageUrl": "https://example.com/product.jpg" }) Tj
+T*
+(Expected: 201 Created with the created product and a generated id.) Tj
+T*
+(Domain behavior: Product.Create validates required text, non-negative price, and non-negative) Tj
+T*
+(quantityAvailable.) Tj
+T*
+() Tj
+T*
+(Step 6 - Update the product) Tj
+T*
+(Request: PUT /api/products/{createdProductId}) Tj
+T*
+(Body example:) Tj
+T*
+({ "name": "Smoke Test Product Updated", "shortDescription": "Updated during smoke test",) Tj
+T*
+("description": "Updated product for end-to-end validation", "price": 109.00,) Tj
+T*
+("quantityAvailable": 8, "imageUrl": "https://example.com/product-updated.jpg" }) Tj
+T*
+(Expected: 200 OK with updated values. Unknown product id returns 404 Not Found.) Tj
+T*
+(Domain behavior: Product.Update owns product state changes and validation.) Tj
+T*
+() Tj
+T*
+(Step 7 - Add product to cart) Tj
+T*
+(Request: POST /api/cart/items) Tj
+T*
+(Body example: { "visitorEmail": "bmacha2015@gmail.com", "productId": 1, "quantity": 2 }) Tj
+T*
+(Expected: 200 OK with cart items, line-item subtotal, and totalAmount.) Tj
+T*
+(Validation check: quantity <= 0 returns 400 Bad Request. Unknown productId returns 404 Not) Tj
+T*
+(Found.) Tj
+T*
+(Repository path: CartController -> CartService -> ICartRepository -> CartRepository ->) Tj
+T*
+(NotificationDbContext.) Tj
+T*
+(Domain behavior: CartItem.Create or CartItem.AddQuantity enforces positive quantities.) Tj
+T*
+() Tj
+T*
+(Step 8 - View the cart) Tj
+T*
+(Request: GET /api/cart/bmacha2015@gmail.com) Tj
+T*
+(Expected: 200 OK with the visitor email, cart items ordered by product name, subtotals, and) Tj
+T*
+(totalAmount.) Tj
+T*
+() Tj
+T*
+(Step 9 - Update a cart item quantity) Tj
+T*
+(Request: PUT /api/cart/items/{cartItemId}) Tj
+T*
+(Body example: { "quantity": 3 }) Tj
+T*
+(Expected: 200 OK with updated cart totals. Unknown cart item id returns 404 Not Found.) Tj
+T*
+(Domain behavior: CartItem.UpdateQuantity enforces positive quantities and updates UpdatedAtUtc.) Tj
+T*
+() Tj
+T*
+(Step 10 - Place an order from the cart) Tj
+T*
+(Request: POST /api/orders) Tj
+T*
+(Body example: { "visitorEmail": "bmacha2015@gmail.com" }) Tj
+T*
+(Expected: 201 Created. The cart is converted into an order, order items are persisted, and the) Tj
+T*
+(cart is cleared.) Tj
+T*
+(Repository path: OrdersController -> OrderService -> IOrderRepository -> OrderRepository ->) Tj
+T*
+(NotificationDbContext.) Tj
+T*
+(Domain behavior: Order.CreateFromCart builds the order, OrderItem.Create snapshots product name) Tj
+T*
+(and price, and totals are calculated.) Tj
+T*
+(Notification behavior: NotificationDispatcher creates admin and visitor notifications through) Tj
+T*
+(INotificationRepository.) Tj
+T*
+(Email behavior: LoggingEmailSender logs, then GmailSmtpEmailSender sends through) Tj
+T*
+ET
+
+endstream
+endobj
+7 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 6 0 R >>
+endobj
+8 0 obj
+<< /Length 2705 >>
+stream
+BT
+/F1 10 Tf
+50 750 Td
+14 TL
+(smtp.gmail.com:587 when SmtpEmail is configured.) Tj
+T*
+() Tj
+T*
+(Step 11 - Verify order history and order detail) Tj
+T*
+(Request: GET /api/orders?visitorEmail=bmacha2015@gmail.com) Tj
+T*
+(Expected: 200 OK with the new order in descending creation order.) Tj
+T*
+(Request: GET /api/orders/{orderId}) Tj
+T*
+(Expected: 200 OK with order statuses, totalAmount, and order item details.) Tj
+T*
+() Tj
+T*
+(Step 12 - Update order status) Tj
+T*
+(Request: PATCH /api/orders/{orderId}/status) Tj
+T*
+(Body example:) Tj
+T*
+({ "orderStatus": "Preparing", "paymentStatus": "Paid", "fulfillmentStatus": "Packing",) Tj
+T*
+("deliveryStatus": "WaitingForRider" }) Tj
+T*
+(Expected: 200 OK with updated statuses and updatedAtUtc changed.) Tj
+T*
+(Domain behavior: Order.UpdateStatuses owns the status state changes.) Tj
+T*
+(Notification behavior: admin and visitor status-update notifications are created and emailed.) Tj
+T*
+() Tj
+T*
+(Step 13 - Verify notifications) Tj
+T*
+(Request: GET /api/notifications?recipientEmail=bmacha2015@gmail.com) Tj
+T*
+(Expected: 200 OK with visitor notifications ordered by newest first.) Tj
+T*
+(Request: GET /api/notifications?orderId={orderId}) Tj
+T*
+(Expected: 200 OK with notifications linked to the order.) Tj
+T*
+(Repository path: NotificationsController -> NotificationService -> INotificationRepository ->) Tj
+T*
+(NotificationRepository -> NotificationDbContext.) Tj
+T*
+() Tj
+T*
+(Step 14 - Verify notification CRUD) Tj
+T*
+(Request: POST /api/notifications with recipientEmail, channel, subject, body, and optional) Tj
+T*
+(orderId.) Tj
+T*
+(Expected: 201 Created. Required recipientEmail, subject, and body are enforced by the) Tj
+T*
+(Notification domain entity.) Tj
+T*
+(Request: PUT /api/notifications/{notificationId}) Tj
+T*
+(Expected: 200 OK with updated notification fields and read state.) Tj
+T*
+(Request: DELETE /api/notifications/{notificationId}) Tj
+T*
+(Expected: 204 No Content. Unknown notification id returns 404 Not Found.) Tj
+T*
+() Tj
+T*
+(Step 15 - Verify email delivery) Tj
+T*
+(Check application logs for queued and sent email messages from LoggingEmailSender.) Tj
+T*
+(Check the Gmail inboxes for the admin and visitor recipients if real SMTP credentials were) Tj
+T*
+(configured.) Tj
+T*
+(If SmtpEmail settings are incomplete, email sending should fail fast with an SMTP configuration) Tj
+T*
+(error.) Tj
+T*
+() Tj
+T*
+(Step 16 - Final database checks) Tj
+T*
+(Verify SQL Server tables: Products, CartItems, Orders, OrderItems, Notifications, and) Tj
+T*
+(__EFMigrationsHistory.) Tj
+T*
+(Expected: created/updated products exist, cart is cleared after order placement, order items) Tj
+T*
+(remain, notifications are linked to the order.) Tj
+T*
+() Tj
+T*
+ET
+
+endstream
+endobj
+9 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 8 0 R >>
+endobj
+10 0 obj
+<< /Length 625 >>
+stream
+BT
+/F1 10 Tf
+50 750 Td
+14 TL
+(Step 17 - Repository wiring check) Tj
+T*
+(Confirm Program.cs registers:) Tj
+T*
+(- ICartRepository -> CartRepository) Tj
+T*
+(- IOrderRepository -> OrderRepository) Tj
+T*
+(- IProductRepository -> ProductRepository) Tj
+T*
+(- INotificationRepository -> NotificationRepository) Tj
+T*
+(Expected: app startup succeeds and API workflows resolve repository dependencies through DI.) Tj
+T*
+() Tj
+T*
+(Pass criteria) Tj
+T*
+(The app starts, Swagger loads, repositories resolve, the product/cart/order workflow succeeds,) Tj
+T*
+(notifications are persisted, and configured Gmail SMTP email is sent.) Tj
+T*
+ET
+
+endstream
+endobj
+11 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 10 0 R >>
+endobj
+xref
+0 12
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000136 00000 n 
+0000000206 00000 n 
+0000002840 00000 n 
+0000002966 00000 n 
+0000005906 00000 n 
+0000006032 00000 n 
+0000008789 00000 n 
+0000008915 00000 n 
+0000009592 00000 n 
+trailer
+<< /Size 12 /Root 1 0 R >>
+startxref
+9720
+%%EOF

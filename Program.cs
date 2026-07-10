@@ -2,7 +2,10 @@ using System.Reflection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi.Models;
 using NSA.Application.Abstractions;
+using NSA.Infrastructure.Email;
 using NSA.Persistence;
+using NSA.Persistence.Concrete;
+using NSA.Persistence.Interfaces;
 using NSA.Service;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -26,8 +29,18 @@ builder.Services.AddSwaggerGen(options =>
 builder.Services.AddDbContext<NotificationDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("NotificationDb")));
 
+builder.Services.AddScoped<ICartRepository, CartRepository>();
+builder.Services.AddScoped<INotificationRepository, NotificationRepository>();
+builder.Services.AddScoped<IOrderRepository, OrderRepository>();
+builder.Services.AddScoped<IProductRepository, ProductRepository>();
+builder.Services.Configure<SmtpEmailOptions>(builder.Configuration.GetSection("SmtpEmail"));
+builder.Services.AddScoped<GmailSmtpEmailSender>();
 builder.Services.AddScoped<IEmailSender, LoggingEmailSender>();
 builder.Services.AddScoped<INotificationDispatcher, NotificationDispatcher>();
+builder.Services.AddScoped<ICartService, CartService>();
+builder.Services.AddScoped<INotificationService, NotificationService>();
+builder.Services.AddScoped<IOrderService, OrderService>();
+builder.Services.AddScoped<IProductService, ProductService>();
 
 var app = builder.Build();
 

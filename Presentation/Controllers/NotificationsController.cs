@@ -1,15 +1,13 @@
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
+using NSA.Application.Abstractions;
 using NSA.Application.Contracts;
-using NSA.Domain.Entities;
-using NSA.Persistence;
 
 namespace NSA.Presentation.Controllers;
 
 [ApiController]
 [Route("api/notifications")]
 [Produces("application/json")]
-public sealed class NotificationsController(NotificationDbContext dbContext) : ControllerBase
+public sealed class NotificationsController(INotificationService notificationService) : ControllerBase
 {
     /// <summary>Gets notifications, optionally filtered by recipient email or order id.</summary>
     /// <response code="200">Returns matching notifications.</response>
@@ -17,18 +15,7 @@ public sealed class NotificationsController(NotificationDbContext dbContext) : C
     [ProducesResponseType(typeof(IEnumerable<NotificationDto>), StatusCodes.Status200OK)]
     public async Task<ActionResult<IEnumerable<NotificationDto>>> GetNotifications([FromQuery] string? recipientEmail, [FromQuery] int? orderId, CancellationToken cancellationToken)
     {
-        var query = dbContext.Notifications.AsQueryable();
-        if (!string.IsNullOrWhiteSpace(recipientEmail))
-        {
-            query = query.Where(notification => notification.RecipientEmail == recipientEmail.Trim());
-        }
-
-        if (orderId.HasValue)
-        {
-            query = query.Where(notification => notification.OrderId == orderId.Value);
-        }
-
-        var notifications = await query.OrderByDescending(notification => notification.CreatedAtUtc).Select(notification => ToDto(notification)).ToListAsync(cancellationToken);
+        var notifications = await notificationService.GetNotificationsAsync(recipientEmail, orderId, cancellationToken);
         return Ok(notifications);
     }
 
@@ -40,8 +27,8 @@ public sealed class NotificationsController(NotificationDbContext dbContext) : C
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<NotificationDto>> GetNotification(int id, CancellationToken cancellationToken)
     {
-        var notification = await dbContext.Notifications.FindAsync([id], cancellationToken);
-        return notification is null ? NotFound() : Ok(ToDto(notification));
+        var notification = await notificationService.GetNotificationAsync(id, cancellationToken);
+        return notification is null ? NotFound() : Ok(notification);
     }
 
     /// <summary>Creates a notification record.</summary>
@@ -52,25 +39,15 @@ public sealed class NotificationsController(NotificationDbContext dbContext) : C
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<NotificationDto>> CreateNotification(CreateNotificationRequest request, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(request.RecipientEmail) || string.IsNullOrWhiteSpace(request.Subject) || string.IsNullOrWhiteSpace(request.Body))
+        try
         {
-            return BadRequest("RecipientEmail, Subject, and Body are required.");
+            var notification = await notificationService.CreateNotificationAsync(request, cancellationToken);
+            return CreatedAtAction(nameof(GetNotification), new { id = notification.Id }, notification);
         }
-
-        var notification = new Notification
+        catch (ArgumentException exception)
         {
-            RecipientEmail = request.RecipientEmail.Trim(),
-            Channel = request.Channel,
-            Subject = request.Subject.Trim(),
-            Body = request.Body.Trim(),
-            OrderId = request.OrderId,
-            CreatedAtUtc = DateTimeOffset.UtcNow,
-            IsRead = false
-        };
-
-        dbContext.Notifications.Add(notification);
-        await dbContext.SaveChangesAsync(cancellationToken);
-        return CreatedAtAction(nameof(GetNotification), new { id = notification.Id }, ToDto(notification));
+            return BadRequest(exception.Message);
+        }
     }
 
     /// <summary>Updates a notification record.</summary>
@@ -83,26 +60,15 @@ public sealed class NotificationsController(NotificationDbContext dbContext) : C
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<NotificationDto>> UpdateNotification(int id, UpdateNotificationRequest request, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(request.RecipientEmail) || string.IsNullOrWhiteSpace(request.Subject) || string.IsNullOrWhiteSpace(request.Body))
+        try
         {
-            return BadRequest("RecipientEmail, Subject, and Body are required.");
+            var notification = await notificationService.UpdateNotificationAsync(id, request, cancellationToken);
+            return notification is null ? NotFound() : Ok(notification);
         }
-
-        var notification = await dbContext.Notifications.FindAsync([id], cancellationToken);
-        if (notification is null)
+        catch (ArgumentException exception)
         {
-            return NotFound();
+            return BadRequest(exception.Message);
         }
-
-        notification.RecipientEmail = request.RecipientEmail.Trim();
-        notification.Channel = request.Channel;
-        notification.Subject = request.Subject.Trim();
-        notification.Body = request.Body.Trim();
-        notification.OrderId = request.OrderId;
-        notification.IsRead = request.IsRead;
-
-        await dbContext.SaveChangesAsync(cancellationToken);
-        return Ok(ToDto(notification));
     }
 
     /// <summary>Deletes a notification record.</summary>
@@ -113,19 +79,7 @@ public sealed class NotificationsController(NotificationDbContext dbContext) : C
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DeleteNotification(int id, CancellationToken cancellationToken)
     {
-        var notification = await dbContext.Notifications.FindAsync([id], cancellationToken);
-        if (notification is null)
-        {
-            return NotFound();
-        }
-
-        dbContext.Notifications.Remove(notification);
-        await dbContext.SaveChangesAsync(cancellationToken);
-        return NoContent();
-    }
-
-    private static NotificationDto ToDto(Notification notification)
-    {
-        return new NotificationDto(notification.Id, notification.RecipientEmail, notification.Channel, notification.Subject, notification.Body, notification.OrderId, notification.IsRead, notification.CreatedAtUtc, notification.SentAtUtc);
+        var deleted = await notificationService.DeleteNotificationAsync(id, cancellationToken);
+        return deleted ? NoContent() : NotFound();
     }
 }

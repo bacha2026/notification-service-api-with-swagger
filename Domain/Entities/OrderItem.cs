@@ -11,4 +11,26 @@ public sealed class OrderItem
     public decimal UnitPrice { get; set; }
     public int Quantity { get; set; }
     public decimal Subtotal { get; set; }
+
+    public static OrderItem Create(Product product, int quantity)
+    {
+        ValidateQuantity(quantity);
+
+        return new OrderItem
+        {
+            ProductId = product.Id,
+            ProductName = product.Name,
+            UnitPrice = product.Price,
+            Quantity = quantity,
+            Subtotal = product.Price * quantity
+        };
+    }
+
+    private static void ValidateQuantity(int quantity)
+    {
+        if (quantity <= 0)
+        {
+            throw new ArgumentException("Quantity must be greater than zero.");
+        }
+    }
 }
