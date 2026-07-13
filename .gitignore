@@ -16,4 +16,17 @@ artifacts/
 
 # Environment/local secrets
 .env
+.env.*
+!.env.example
 appsettings.Local.json
+*.pfx
+*.p12
+*.pem
+*.key
+
+# Additional IDE and coverage output
+.idea/
+coverage/
+coverage.*
+*.coverage
+*.coveragexml

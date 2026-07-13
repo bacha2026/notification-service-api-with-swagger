@@ -16,7 +16,7 @@
         <mxCell id="admin" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontSize=13;" value="Admin&lt;br&gt;bmacha2026@gmail.com" vertex="1">
           <mxGeometry height="70" width="170" x="75" y="280" as="geometry" />
         </mxCell>
-        <mxCell id="swaggerClient" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=13;" value="Swagger UI&lt;br&gt;/swagger&lt;br&gt;OpenAPI 3.0.1" vertex="1">
+        <mxCell id="swaggerClient" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=13;" value="Swagger UI&lt;br&gt;/swagger&lt;br&gt;separate OpenAPI v1 + v2" vertex="1">
           <mxGeometry height="90" width="170" x="75" y="420" as="geometry" />
         </mxCell>
         <mxCell id="apiBoundary" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=1;fontSize=17;verticalAlign=top;spacingTop=12;" value="ASP.NET Core 8 Notification Service API" vertex="1">
@@ -73,11 +73,11 @@
         <mxCell id="notificationService" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#9673a6;fontSize=12;" value="NotificationService&lt;br&gt;notification CRUD&lt;br&gt;DTO mapping" vertex="1">
           <mxGeometry height="58" width="125" x="795" y="625" as="geometry" />
         </mxCell>
-        <mxCell id="dispatcher" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#9673a6;fontSize=12;" value="NotificationDispatcher&lt;br&gt;creates notification records&lt;br&gt;calls email sender" vertex="1">
+        <mxCell id="dispatcher" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#9673a6;fontSize=12;" value="NotificationDispatcher&lt;br&gt;persists pending intent&lt;br&gt;marks sent only after provider acceptance" vertex="1">
           <mxGeometry height="58" width="110" x="930" y="625" as="geometry" />
         </mxCell>
-        <mxCell id="emailSender" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#9673a6;fontSize=12;" value="LoggingEmailSender&lt;br&gt;logs notification email details&lt;br&gt;no external provider" vertex="1">
-          <mxGeometry height="42" width="245" x="795" y="695" as="geometry" />
+        <mxCell id="emailSender" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#9673a6;fontSize=12;" value="PostboundEmailSender&lt;br&gt;typed HttpClient + per-attempt timeout&lt;br&gt;retry + shared circuit breaker&lt;br&gt;disabled: NotAttempted, no network/PII" vertex="1">
+          <mxGeometry height="72" width="245" x="795" y="695" as="geometry" />
         </mxCell>
         <mxCell id="persistenceBoundary" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontStyle=1;fontSize=15;verticalAlign=top;spacingTop=8;" value="Persistence - repository abstraction over database access" vertex="1">
           <mxGeometry height="170" width="690" x="370" y="780" as="geometry" />
@@ -103,10 +103,10 @@
         <mxCell id="sqlServer" parent="1" style="shape=cylinder3d;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" value="SQL Server&lt;br&gt;NotificationServiceDb&lt;br&gt;Products, CartItems, Orders,&lt;br&gt;OrderItems, Notifications&lt;br&gt;__EFMigrationsHistory" vertex="1">
           <mxGeometry height="135" width="260" x="1205" y="330" as="geometry" />
         </mxCell>
-        <mxCell id="emailSink" parent="1" style="shape=message;whiteSpace=wrap;html=1;outlineConnect=0;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=12;" value="Application Logs&lt;br&gt;email recipient, subject, body&lt;br&gt;recorded for smoke testing" vertex="1">
+        <mxCell id="emailSink" parent="1" style="shape=message;whiteSpace=wrap;html=1;outlineConnect=0;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=12;" value="Application Logs&lt;br&gt;policy transitions + safe state&lt;br&gt;no recipient, subject, or body" vertex="1">
           <mxGeometry height="105" width="250" x="1210" y="540" as="geometry" />
         </mxCell>
-        <mxCell id="flowNote" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=13;align=left;spacingLeft=10;" value="Primary runtime flow:&lt;br&gt;1. Start app and migrations apply&lt;br&gt;2. Controllers delegate to services&lt;br&gt;3. Services use domain rules and repository interfaces&lt;br&gt;4. Concrete repositories query/save with NotificationDbContext&lt;br&gt;5. OrderService places order + clears cart&lt;br&gt;6. NotificationDispatcher creates notifications&lt;br&gt;7. LoggingEmailSender writes email details to logs" vertex="1">
+        <mxCell id="flowNote" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=13;align=left;spacingLeft=10;" value="Primary runtime flow:&lt;br&gt;1. URL versioning selects v1/v2; v1 emits Deprecation + Sunset&lt;br&gt;2. Swagger publishes concrete versioned contracts&lt;br&gt;3. Controllers delegate to services; all errors use Problem Details&lt;br&gt;4. Repositories query/save through NotificationDbContext&lt;br&gt;5. Bulk admission is atomic/bounded; terminal jobs release payloads&lt;br&gt;6. BulkNotificationWorker processes jobs through scoped services&lt;br&gt;7. Disabled email returns NotAttempted and leaves the persisted intent pending" vertex="1">
           <mxGeometry height="120" width="690" x="370" y="960" as="geometry" />
         </mxCell>
         <mxCell id="edgeVisitorSwagger" edge="1" parent="1" source="visitor" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#6c8ebf;endArrow=block;endFill=1;fontSize=11;" target="swaggerClient" value="explores API">
@@ -255,8 +255,8 @@
         <mxCell id="notificationRecordEvent" value="Persist Notification record&lt;br&gt;Recipient, channel, subject, body, order id, sent/read flags&lt;br&gt;Notification entity owns create/update rules" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#b85450;fontSize=13;" vertex="1" parent="1">
           <mxGeometry x="880" y="680" width="330" height="60" as="geometry" />
         </mxCell>
-        <mxCell id="emailEvent" value="Send through IEmailSender&lt;br&gt;LoggingEmailSender records recipient,&lt;br&gt;subject, and body in app logs" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#b85450;fontSize=13;" vertex="1" parent="1">
-          <mxGeometry x="1280" y="680" width="210" height="60" as="geometry" />
+        <mxCell id="emailEvent" value="Persist pending intent, then send via IEmailSender&lt;br&gt;Postbound adapter: timeout + retry + circuit breaker&lt;br&gt;disabled by default; logs recipient + subject only" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#b85450;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="1260" y="670" width="250" height="80" as="geometry" />
         </mxCell>
         <mxCell id="e1" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#6c8ebf;" edge="1" parent="1" source="draft" target="pending">
           <mxGeometry relative="1" as="geometry" />

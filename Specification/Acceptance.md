@@ -12,7 +12,11 @@
 - Notification CRUD endpoints support create, read, update, and delete operations.
 - Notification creation, updates, required-field validation, and sent-state changes are owned by the Notification domain entity.
 - Controllers contain endpoint routing and HTTP response shaping while application services handle persistence, DTO mapping, and workflow coordination.
-- Email notifications are logged by LoggingEmailSender; no external email provider is configured.
+- Email delivery is routed through `PostboundEmailSender`. While `Postbound:Enabled` is `false`, it emits a metadata-free operational log, makes no HTTP call, and leaves the persisted intent pending; the provider contract must be verified before enabling real delivery.
+- Bulk email items are persisted and passed through `INotificationDispatcher`; non-email bulk items are persisted as notification records. A bulk item succeeds when its Week 2 record-processing flow completes, while `SentAtUtc` means an enabled provider accepted the email. Job status exposes only safe summary errors.
+- API v1 and v2 publish separate OpenAPI documents with concrete versioned paths; legacy unversioned routes remain documented in v2 only.
+- All API error paths return RFC 7807 Problem Details, and deprecated v1 responses include `Deprecation` and `Sunset` headers.
+- Outbound email attempts use a per-attempt timeout, three exponential retries, and a circuit breaker around each exhausted logical operation.
 - Database seed data includes products, cart items, orders, order items, and notification records for bmacha2015@gmail.com and bmacha2026@gmail.com.
 - The API creates or updates NotificationServiceDb on startup through EF Core migrations.
 - OpenAPI 3.0 is exposed through Swashbuckle at /swagger with XML endpoint comments.

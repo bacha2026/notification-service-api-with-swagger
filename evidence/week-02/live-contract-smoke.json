@@ -1,0 +1,128 @@
+{
+  "verifiedAtUtc": "2026-07-13T05:10:56.6325998+00:00",
+  "baseUrl": "http://127.0.0.1:5099",
+  "passed": true,
+  "probeCount": 12,
+  "probes": [
+    {
+      "name": "Swagger v1 JSON",
+      "method": "GET",
+      "path": "/swagger/v1/swagger.json",
+      "status": 200,
+      "contentType": "application/json",
+      "deprecation": null,
+      "sunset": null,
+      "problemTraceIdPresent": false
+    },
+    {
+      "name": "Swagger v2 JSON",
+      "method": "GET",
+      "path": "/swagger/v2/swagger.json",
+      "status": 200,
+      "contentType": "application/json",
+      "deprecation": null,
+      "sunset": null,
+      "problemTraceIdPresent": false
+    },
+    {
+      "name": "v1 route and retirement headers",
+      "method": "GET",
+      "path": "/api/v1/products",
+      "status": 200,
+      "contentType": "application/json",
+      "deprecation": "true",
+      "sunset": "Thu, 31 Dec 2026 23:59:59 GMT",
+      "problemTraceIdPresent": false
+    },
+    {
+      "name": "v1.0 missing resource",
+      "method": "GET",
+      "path": "/api/v1.0/notifications/2147483647",
+      "status": 404,
+      "contentType": "application/problem+json",
+      "deprecation": "true",
+      "sunset": "Thu, 31 Dec 2026 23:59:59 GMT",
+      "problemTraceIdPresent": true
+    },
+    {
+      "name": "v2 route",
+      "method": "GET",
+      "path": "/api/v2/products",
+      "status": 200,
+      "contentType": "application/json",
+      "deprecation": null,
+      "sunset": null,
+      "problemTraceIdPresent": false
+    },
+    {
+      "name": "unversioned compatibility route",
+      "method": "GET",
+      "path": "/api/products",
+      "status": 200,
+      "contentType": "application/json",
+      "deprecation": null,
+      "sunset": null,
+      "problemTraceIdPresent": false
+    },
+    {
+      "name": "model validation",
+      "method": "POST",
+      "path": "/api/v2/notifications",
+      "status": 400,
+      "contentType": "application/problem+json",
+      "deprecation": null,
+      "sunset": null,
+      "problemTraceIdPresent": true
+    },
+    {
+      "name": "malformed JSON",
+      "method": "POST",
+      "path": "/api/v2/notifications",
+      "status": 400,
+      "contentType": "application/problem+json",
+      "deprecation": null,
+      "sunset": null,
+      "problemTraceIdPresent": true
+    },
+    {
+      "name": "missing route",
+      "method": "GET",
+      "path": "/api/v2/not-a-route",
+      "status": 404,
+      "contentType": "application/problem+json",
+      "deprecation": null,
+      "sunset": null,
+      "problemTraceIdPresent": true
+    },
+    {
+      "name": "method mismatch",
+      "method": "PATCH",
+      "path": "/api/v2/products/1",
+      "status": 405,
+      "contentType": "application/problem+json",
+      "deprecation": null,
+      "sunset": null,
+      "problemTraceIdPresent": true
+    },
+    {
+      "name": "unsupported media type",
+      "method": "POST",
+      "path": "/api/v2/notifications",
+      "status": 415,
+      "contentType": "application/problem+json",
+      "deprecation": null,
+      "sunset": null,
+      "problemTraceIdPresent": true
+    },
+    {
+      "name": "unsupported API version",
+      "method": "GET",
+      "path": "/api/v9/products",
+      "status": 404,
+      "contentType": "application/problem+json",
+      "deprecation": null,
+      "sunset": null,
+      "problemTraceIdPresent": true
+    }
+  ]
+}

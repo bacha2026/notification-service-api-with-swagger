@@ -1,0 +1,687 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Notification Service API - Six-Week Execution Plan</title>
+  <style>
+    :root {
+      --navy: #12304a;
+      --blue: #1565c0;
+      --sky: #eaf3fb;
+      --teal: #00796b;
+      --green: #2e7d32;
+      --amber: #a95d00;
+      --red: #b3261e;
+      --ink: #1f2933;
+      --muted: #5d6975;
+      --line: #ced7df;
+      --paper: #ffffff;
+      --soft: #f5f7f9;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; background: #dfe5ea; color: var(--ink); }
+    body { font-family: "Segoe UI", Arial, sans-serif; font-size: 9.5pt; line-height: 1.38; }
+
+    .page {
+      position: relative;
+      width: 210mm;
+      min-height: 297mm;
+      margin: 8mm auto;
+      padding: 14mm 15mm 15mm;
+      background: var(--paper);
+      box-shadow: 0 2mm 7mm rgba(20, 35, 50, .14);
+      overflow: hidden;
+      page-break-after: always;
+    }
+    .page:last-child { page-break-after: auto; }
+    .page-number {
+      position: absolute;
+      right: 15mm;
+      bottom: 7mm;
+      color: var(--muted);
+      font-size: 8pt;
+    }
+    .footer-label {
+      position: absolute;
+      left: 15mm;
+      bottom: 7mm;
+      color: var(--muted);
+      font-size: 8pt;
+    }
+
+    h1, h2, h3, h4 { color: var(--navy); margin: 0; line-height: 1.16; }
+    h1 { font-size: 27pt; letter-spacing: -.4pt; }
+    h2 { font-size: 19pt; margin-bottom: 4mm; }
+    h3 { font-size: 12.5pt; margin: 5mm 0 2mm; }
+    h4 { font-size: 10pt; margin: 3mm 0 1.5mm; }
+    p { margin: 0 0 2.4mm; }
+    ul, ol { margin: 1.5mm 0 3mm 5mm; padding-left: 4mm; }
+    li { margin-bottom: 1mm; }
+    code { font-family: Consolas, monospace; font-size: 8.4pt; background: #eef2f5; padding: .2mm .7mm; border-radius: 1mm; }
+    strong { color: #172533; }
+
+    .eyebrow {
+      color: var(--blue);
+      font-size: 8pt;
+      font-weight: 750;
+      letter-spacing: 1.1pt;
+      text-transform: uppercase;
+      margin-bottom: 2mm;
+    }
+    .subtitle { color: var(--muted); font-size: 13pt; line-height: 1.35; margin: 4mm 0 8mm; max-width: 150mm; }
+    .rule { height: 1.5mm; width: 40mm; background: var(--blue); margin: 6mm 0; }
+    .muted { color: var(--muted); }
+    .small { font-size: 8.2pt; }
+    .tight p { margin-bottom: 1.2mm; }
+
+    .cover {
+      background:
+        linear-gradient(135deg, rgba(18,48,74,.98), rgba(21,101,192,.91)),
+        var(--navy);
+      color: #fff;
+      padding: 23mm 19mm;
+    }
+    .cover h1, .cover h2, .cover h3, .cover strong { color: #fff; }
+    .cover .eyebrow { color: #a9d2ff; }
+    .cover .subtitle { color: #e4eef7; }
+    .cover .rule { background: #64b5f6; }
+    .cover-card {
+      margin-top: 14mm;
+      padding: 7mm;
+      border: .35mm solid rgba(255,255,255,.35);
+      background: rgba(255,255,255,.09);
+      border-radius: 2mm;
+    }
+    .cover-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5mm 9mm; }
+    .cover-label { color: #a9d2ff; font-size: 7.5pt; letter-spacing: .8pt; text-transform: uppercase; }
+    .cover-value { font-size: 10.5pt; margin-top: .8mm; }
+    .cover .page-number, .cover .footer-label { color: #c8d9e8; }
+
+    .callout {
+      border-left: 1.4mm solid var(--blue);
+      background: var(--sky);
+      padding: 3mm 4mm;
+      margin: 3mm 0 4mm;
+    }
+    .callout.warn { border-color: var(--amber); background: #fff5e6; }
+    .callout.risk { border-color: var(--red); background: #fff0ef; }
+    .callout.good { border-color: var(--green); background: #edf8ee; }
+
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 4mm; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3mm; }
+    .card { border: .3mm solid var(--line); border-radius: 1.5mm; padding: 3.2mm; background: #fff; }
+    .card h3, .card h4 { margin-top: 0; }
+    .metric { font-size: 18pt; font-weight: 750; color: var(--blue); }
+    .metric-label { color: var(--muted); font-size: 8pt; }
+
+    table { width: 100%; border-collapse: collapse; margin: 2mm 0 4mm; font-size: 8.4pt; }
+    th { background: var(--navy); color: #fff; text-align: left; padding: 2.1mm 2.4mm; font-weight: 650; }
+    td { border: .25mm solid var(--line); vertical-align: top; padding: 2mm 2.4mm; }
+    tr:nth-child(even) td { background: #f8fafb; }
+    .compact td, .compact th { padding: 1.55mm 2mm; }
+
+    .status { display: inline-block; padding: .6mm 1.8mm; border-radius: 9mm; font-size: 7pt; font-weight: 750; white-space: nowrap; }
+    .done { color: #175c22; background: #ddf2df; }
+    .partial { color: #865000; background: #ffedc7; }
+    .planned { color: #174f86; background: #dcecff; }
+    .external { color: #6941a5; background: #eee4ff; }
+    .blocked { color: #8e211c; background: #ffe0dd; }
+
+    .week-head { display: grid; grid-template-columns: 25mm 1fr; gap: 5mm; align-items: center; margin-bottom: 4mm; }
+    .week-badge {
+      height: 25mm; width: 25mm; border-radius: 50%; background: var(--navy); color: #fff;
+      display: flex; flex-direction: column; justify-content: center; align-items: center; line-height: 1;
+    }
+    .week-badge span:first-child { font-size: 7pt; letter-spacing: .8pt; }
+    .week-badge span:last-child { font-size: 18pt; font-weight: 800; margin-top: 1mm; }
+    .week-head h2 { margin: 0 0 1mm; }
+    .tags { color: var(--blue); font-size: 8pt; font-weight: 650; }
+
+    .day-plan { display: grid; grid-template-columns: 15mm 1fr 15mm; gap: 2.5mm; border-top: .3mm solid var(--line); padding: 2.2mm 0; }
+    .day-plan:first-child { border-top: 0; }
+    .day { font-weight: 750; color: var(--navy); }
+    .hours { text-align: right; color: var(--muted); font-weight: 650; }
+    .task-id { color: var(--blue); font-weight: 750; margin-right: 1.5mm; }
+
+    .flow { display: grid; grid-template-columns: 1fr 8mm 1fr 8mm 1fr 8mm 1fr; align-items: center; margin: 4mm 0; }
+    .flow-box { border: .35mm solid var(--blue); border-radius: 1.5mm; padding: 3mm 2mm; text-align: center; background: var(--sky); min-height: 22mm; }
+    .arrow { text-align: center; font-size: 16pt; color: var(--blue); }
+    .checklist { list-style: none; margin-left: 0; padding-left: 0; }
+    .checklist li { position: relative; padding-left: 5mm; margin-bottom: 1.5mm; }
+    .checklist li::before { content: "\2610"; position: absolute; left: 0; color: var(--blue); font-size: 11pt; line-height: 1; }
+    .artifact { font-family: Consolas, monospace; font-size: 7.8pt; color: #33475b; }
+    .dense { font-size: 9pt; line-height: 1.3; }
+    .dense h3 { margin: 3.5mm 0 1.5mm; }
+    .dense table { font-size: 8.1pt; margin-bottom: 2.5mm; }
+    .dense table td, .dense table th { padding: 1.3mm 1.8mm; }
+    .dense .callout { margin: 2mm 0; padding: 2.5mm 3.5mm; }
+
+    @media print {
+      html, body { background: #fff; }
+      .page { margin: 0; box-shadow: none; width: 210mm; height: 297mm; min-height: 297mm; }
+      a { color: inherit; text-decoration: none; }
+      @page { size: A4; margin: 0; }
+    }
+    @media screen {
+      body:has(.page:target) .page:not(:target) { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+  <section class="page cover" id="page-1">
+    <div class="eyebrow">Execution baseline / Version 1.0</div>
+    <div class="rule"></div>
+    <h1>Notification Service API</h1>
+    <h2>Six-Week Senior Upskill Execution Plan</h2>
+    <p class="subtitle">A repository-aware plan that converts the supplied 6-Week Schedule into sequenced engineering work, measurable quality gates, and review evidence.</p>
+
+    <div class="cover-card">
+      <div class="cover-grid">
+        <div><div class="cover-label">Prepared for</div><div class="cover-value">Bethoven Acha</div></div>
+        <div><div class="cover-label">Target</div><div class="cover-value">Grade 4 / Senior readiness</div></div>
+        <div><div class="cover-label">Prepared on</div><div class="cover-value">13 July 2026</div></div>
+        <div><div class="cover-label">Schedule</div><div class="cover-value">6 weeks · approximately 20 hours/week</div></div>
+        <div><div class="cover-label">Anchor repository</div><div class="cover-value">NSA / Notification Service API</div></div>
+        <div><div class="cover-label">Baseline</div><div class="cover-value">main @ 91d94c0 plus current local restructuring</div></div>
+      </div>
+    </div>
+
+    <div style="margin-top:18mm" class="grid-3">
+      <div class="card" style="background:rgba(255,255,255,.1);border-color:rgba(255,255,255,.3)">
+        <div class="metric" style="color:#fff">W1–W2</div>
+        <div class="metric-label" style="color:#d8e6f2">Substantially built; verification and evidence remain</div>
+      </div>
+      <div class="card" style="background:rgba(255,255,255,.1);border-color:rgba(255,255,255,.3)">
+        <div class="metric" style="color:#fff">W3–W6</div>
+        <div class="metric-label" style="color:#d8e6f2">Major implementation phases still planned</div>
+      </div>
+      <div class="card" style="background:rgba(255,255,255,.1);border-color:rgba(255,255,255,.3)">
+        <div class="metric" style="color:#fff">5 gates</div>
+        <div class="metric-label" style="color:#d8e6f2">Two code reviews, presentation, frontend audit, final demo</div>
+      </div>
+    </div>
+
+    <div style="position:absolute;left:19mm;right:19mm;bottom:25mm;border-top:.3mm solid rgba(255,255,255,.3);padding-top:4mm">
+      <p><strong>Planning rule:</strong> working code, tests, PRs, ADRs, and recorded demonstrations are the acceptance signal. Course completion is supporting evidence only.</p>
+    </div>
+    <div class="footer-label">NSA · Six-Week Execution Plan</div><div class="page-number">1 / 12</div>
+  </section>
+
+  <section class="page" id="page-2">
+    <div class="eyebrow">Executive direction</div>
+    <h2>Outcome, boundaries, and planning assumptions</h2>
+
+    <div class="callout good"><strong>Outcome:</strong> evolve the existing .NET 8 API into a demonstrable event-driven system with documented contracts, durable delivery, frontend rendering examples, repeatable infrastructure, and a tested blue/green release path.</div>
+
+    <div class="grid-2">
+      <div>
+        <h3>What this plan covers</h3>
+        <ul>
+          <li>Every activity and deliverable named in the supplied 6-Week Schedule.</li>
+          <li>Repository gaps discovered in the 13 July 2026 local audit.</li>
+          <li>Daily engineering tasks sized to roughly four focused hours.</li>
+          <li>Acceptance checks, evidence locations, review gates, dependencies, and risks.</li>
+        </ul>
+      </div>
+      <div>
+        <h3>What requires human coordination</h3>
+        <ul>
+          <li>EM confirms Week 1 start date, code reviews, presentation slot, and Grade 4 rubric.</li>
+          <li>Bethoven takes and submits Skill IQ assessments.</li>
+          <li>EM supplies the ten React hook snippets.</li>
+          <li>GitHub, Pluralsight, GHCR, Docker Desktop, and presentation access are available.</li>
+        </ul>
+      </div>
+    </div>
+
+    <h3>Operating model</h3>
+    <table class="compact">
+      <tr><th style="width:25%">Cadence</th><th>Execution rule</th></tr>
+      <tr><td>Start of week</td><td>Confirm prerequisites, branch from a green main branch, and lock the week's Definition of Done.</td></tr>
+      <tr><td>Each day</td><td>Work in small commits; update evidence; send EM <strong>Done · Blocked · Tomorrow</strong>.</td></tr>
+      <tr><td>Before merge</td><td>Build, tests, security/configuration checks, documentation, and demo script must pass.</td></tr>
+      <tr><td>End of week</td><td>Tag the baseline, record the demo, capture review findings, and carry only explicit remediation forward.</td></tr>
+      <tr><td>Change control</td><td>If a requirement changes, update this plan and an ADR before changing architecture.</td></tr>
+    </table>
+
+    <h3>Status language used in this plan</h3>
+    <div class="grid-2">
+      <div class="card"><span class="status done">EVIDENCED</span><p class="small" style="margin-top:2mm">Present in the local repository and buildable.</p></div>
+      <div class="card"><span class="status partial">VERIFY / HARDEN</span><p class="small" style="margin-top:2mm">Implemented, but acceptance evidence or edge-case tests are missing.</p></div>
+      <div class="card"><span class="status planned">PLANNED</span><p class="small" style="margin-top:2mm">No repository evidence was found; implementation is scheduled.</p></div>
+      <div class="card"><span class="status external">EXTERNAL</span><p class="small" style="margin-top:2mm">Requires an account, EM input, live review, or assessment.</p></div>
+    </div>
+
+    <div class="callout warn"><strong>Baseline caution:</strong> the local worktree contains extensive uncommitted folder restructuring. The first execution action is to review and preserve those changes in a clean baseline commit or PR; no reset or bulk cleanup should be performed.</div>
+    <div class="footer-label">Scope and controls</div><div class="page-number">2 / 12</div>
+  </section>
+
+  <section class="page" id="page-3">
+    <div class="eyebrow">Repository-aware gap analysis</div>
+    <h2>Current state against the six-week schedule</h2>
+
+    <table>
+      <thead><tr><th style="width:11%">Week</th><th style="width:18%">State</th><th>Evidence already present</th><th>Work still required</th></tr></thead>
+      <tbody>
+        <tr><td><strong>1</strong></td><td><span class="status partial">VERIFY / HARDEN</span></td><td>.NET 8 CRUD API; Swagger; XML docs; EF migrations; draw.io architecture file; project builds cleanly.</td><td>Skill IQ proof; GitHub/PR proof; documentation completeness audit; 30-minute design evidence; one-page decision record; repeatable smoke checks.</td></tr>
+        <tr><td><strong>2</strong></td><td><span class="status partial">VERIFY / HARDEN</span></td><td>v1/v2 routes; deprecation/sunset headers; Problem Details; 3 ADRs; Polly retry/circuit breaker; in-memory bulk queue, worker, and status endpoint.</td><td>Automated error/version/resilience tests; measured 202 latency under 100 ms; ADR alternatives/tradeoffs; enabled-provider failure demo; EM Review #1.</td></tr>
+        <tr><td><strong>3</strong></td><td><span class="status planned">PLANNED</span></td><td>Week 2 in-process flow provides a migration starting point.</td><td>RabbitMQ; separate WorkerService; persisted job status; DLQ; Docker Desktop run; 10 React fixes; ADR presentation.</td></tr>
+        <tr><td><strong>4</strong></td><td><span class="status planned">PLANNED</span></td><td>EF Core and SQL Server already in use.</td><td>Idempotency; transactional Outbox; broker-down recovery proof; four-mode Next.js app; CI and GHCR workflow; EM Review #2.</td></tr>
+        <tr><td><strong>5</strong></td><td><span class="status planned">PLANNED</span></td><td>Current application has a SQL dependency and clear configuration points.</td><td>React polish; Angular OnPush demo; full Compose stack; Vault bootstrap; re-runnable provisioning; unit/integration test expansion.</td></tr>
+        <tr><td><strong>6</strong></td><td><span class="status planned">PLANNED</span></td><td>No deployment automation found.</td><td>Nginx blue/green topology; health-gated switch; one-command rollback; availability proof; retakes; final live assessment.</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Architecture evolution</h3>
+    <div class="flow">
+      <div class="flow-box"><strong>Now / W2</strong><br><span class="small">API + in-memory Channel + hosted worker</span></div><div class="arrow">→</div>
+      <div class="flow-box"><strong>W3</strong><br><span class="small">API → RabbitMQ → separate Worker + DLQ</span></div><div class="arrow">→</div>
+      <div class="flow-box"><strong>W4–W5</strong><br><span class="small">SQL Outbox + idempotency + Compose + Vault</span></div><div class="arrow">→</div>
+      <div class="flow-box"><strong>W6</strong><br><span class="small">Blue/green API behind Nginx with gated cutover</span></div>
+    </div>
+
+    <h3>Proposed repository shape by Week 5</h3>
+    <table class="compact">
+      <tr><th>Area</th><th>Purpose</th></tr>
+      <tr><td class="artifact">src/NSA.Api</td><td>HTTP contracts, OpenAPI, versioning, job submission and status.</td></tr>
+      <tr><td class="artifact">src/NSA.Worker</td><td>RabbitMQ consumer, retry/dead-letter handling, notification delivery.</td></tr>
+      <tr><td class="artifact">src/NSA.Domain · Application · Infrastructure</td><td>Shared domain rules, use cases/contracts, persistence and provider adapters. Split only when it reduces coupling; avoid a cosmetic rewrite.</td></tr>
+      <tr><td class="artifact">tests/NSA.UnitTests · NSA.IntegrationTests</td><td>Fast domain/application tests and container-backed API/broker/database tests.</td></tr>
+      <tr><td class="artifact">web/rendering-lab · web/angular-onpush-demo</td><td>Next.js rendering-mode evidence and focused Angular change-detection evidence.</td></tr>
+      <tr><td class="artifact">deploy/compose · deploy/blue-green</td><td>Local infrastructure, Vault bootstrap, Nginx switching, rollback and demo scripts.</td></tr>
+      <tr><td class="artifact">docs/adr · evidence/week-XX</td><td>Decisions and reviewable proof: commands, screenshots, timings, and demo notes.</td></tr>
+    </table>
+    <p class="small muted">The exact project split is confirmed in the Week 3 topology ADR before files move. The schedule requires an API and separate WorkerService; additional libraries are optional and must earn their complexity.</p>
+    <div class="footer-label">Baseline and target architecture</div><div class="page-number">3 / 12</div>
+  </section>
+
+  <section class="page" id="page-4">
+    <div class="week-head"><div class="week-badge"><span>WEEK</span><span>1</span></div><div><div class="eyebrow">OpenAPI foundation + architecture refresh</div><h2>Stabilize and prove the existing foundation</h2><div class="tags">API documentation · System design · Baseline assessments</div></div></div>
+
+    <div class="callout"><strong>Week objective:</strong> convert the current implementation into a clean, reviewable Week 1 baseline rather than rebuilding working features. Record external assessments before course work.</div>
+
+    <div class="grid-2">
+      <div class="card"><h4>Current evidence</h4><p>.NET 8 API, CRUD controllers, EF Core, Swagger at <code>/swagger</code>, XML endpoint comments, acceptance notes, and <code>drawio/notification.drawio</code>.</p></div>
+      <div class="card"><h4>Primary gaps</h4><p>Skill IQ evidence, GitHub/PR evidence, documentation completeness, decision-paper linkage, timed design proof, and automated smoke coverage.</p></div>
+    </div>
+
+    <h3>Five-day execution sequence</h3>
+    <div>
+      <div class="day-plan"><div class="day">Day 1</div><div><span class="task-id">W1-01</span>Take C#, ASP.NET Core, and React Skill IQ baselines before courses; send results to EM. <span class="task-id">W1-02</span>Review the dirty worktree, build, run migrations, and establish a protected baseline branch/PR.</div><div class="hours">4 h</div></div>
+      <div class="day-plan"><div class="day">Day 2</div><div><span class="task-id">W1-03</span>Inventory every CRUD route, request/response, validation rule, and status code. Complete missing XML <code>summary</code>/<code>response</code> documentation and OpenAPI response metadata.</div><div class="hours">4 h</div></div>
+      <div class="day-plan"><div class="day">Day 3</div><div><span class="task-id">W1-04</span>Add repeatable build/start/Swagger checks and CRUD smoke scenarios. Verify OpenAPI JSON is valid and Swagger shows schemas, versions, success codes, and failure codes.</div><div class="hours">4 h</div></div>
+      <div class="day-plan"><div class="day">Day 4</div><div><span class="task-id">W1-05</span>Run the 30-minute order-tracking whiteboard exercise. Export the draw.io diagram to PDF/PNG. Create a one-page decision note covering context, constraints, design, alternatives, and tradeoffs.</div><div class="hours">4 h</div></div>
+      <div class="day-plan"><div class="day">Day 5</div><div><span class="task-id">W1-06</span>Rewrite README setup/demo instructions, publish the GitHub PR, run the Week 1 demo script, resolve critical findings, and tag the accepted baseline.</div><div class="hours">4 h</div></div>
+    </div>
+
+    <h3>Exit criteria</h3>
+    <div class="grid-2">
+      <ul class="checklist">
+        <li>All three baseline scores are timestamped and sent before courses.</li>
+        <li><code>dotnet build</code> is clean and application startup is repeatable.</li>
+        <li>Notification CRUD and supporting routes pass smoke checks.</li>
+        <li><code>/swagger</code> loads and OpenAPI documents all endpoint outcomes.</li>
+      </ul>
+      <ul class="checklist">
+        <li>Architecture source and exported diagram are readable.</li>
+        <li>One-page decision document explains alternatives and tradeoffs.</li>
+        <li>GitHub PR/repository link and demo evidence are captured.</li>
+        <li>README enables a reviewer to run the solution without oral help.</li>
+      </ul>
+    </div>
+
+    <h3>Required evidence</h3>
+    <p class="artifact">evidence/week-01/{skill-iq-record.md, build.txt, swagger.png, crud-smoke.md, architecture-export.pdf, demo-notes.md}</p>
+    <div class="callout warn small"><strong>Decision needed:</strong> confirm with the EM whether the Week 1 one-page decision note can become ADR 001 or must remain a separate artifact.</div>
+    <div class="footer-label">Week 1 plan</div><div class="page-number">4 / 12</div>
+  </section>
+
+  <section class="page" id="page-5">
+    <div class="week-head"><div class="week-badge"><span>WEEK</span><span>2</span></div><div><div class="eyebrow">Error design, versioning + async foundations</div><h2>Test and demonstrate the features already built</h2><div class="tags">Problem Details · API versions · ADRs · Polly · Background jobs</div></div></div>
+
+    <div class="callout"><strong>Week objective:</strong> harden the existing Week 2 implementation with explicit contracts and measurable proof, then pass EM Code Review #1.</div>
+
+    <div class="grid-2">
+      <div class="card"><h4>Current evidence</h4><p>v1/v2 routes, deprecation headers, Problem Details handler/pages, three ADRs, typed Postbound client with retry/circuit breaker, in-memory job channel, hosted worker, 202 and status routes.</p></div>
+      <div class="card"><h4>Primary gaps</h4><p>No automated tests, resilience transcript, latency measurement, or external review. Polly is bypassed while Postbound is disabled; bulk work currently persists records but does not call the sender.</p></div>
+    </div>
+
+    <h3>Five-day execution sequence</h3>
+    <div>
+      <div class="day-plan"><div class="day">Day 1</div><div><span class="task-id">W2-01</span>Define and automate the error matrix: model validation, domain validation, missing resource, unsupported version, malformed request, method mismatch, and unexpected exception. Require RFC 7807 media type and trace ID.</div><div class="hours">4 h</div></div>
+      <div class="day-plan"><div class="day">Day 2</div><div><span class="task-id">W2-02</span>Test v1/v2 routes and headers. Refine all three ADRs to record status, context, decision drivers, considered options, decision, consequences, and validation method.</div><div class="hours">4 h</div></div>
+      <div class="day-plan"><div class="day">Day 3</div><div><span class="task-id">W2-03</span>Create a deterministic failing HTTP test server/handler. Prove three exponential retries and circuit opening; document how the provider prevents a retried email POST from duplicating delivery.</div><div class="hours">4 h</div></div>
+      <div class="day-plan"><div class="day">Day 4</div><div><span class="task-id">W2-04</span>Confirm whether “bulk notification” means record creation or delivery, then test that contract, job states, and failure counts. Submit at least 20 requests and record p95; require HTTP 202 plus job ID with p95 &lt;100 ms locally.</div><div class="hours">4 h</div></div>
+      <div class="day-plan"><div class="day">Day 5</div><div><span class="task-id">W2-05</span>Run EM Code Review #1 using a scripted demo. Address blocking findings, record non-blocking debt, merge, and tag <code>week-2-complete</code>.</div><div class="hours">4 h</div></div>
+    </div>
+
+    <h3>Exit criteria</h3>
+    <div class="grid-2">
+      <ul class="checklist">
+        <li>v1 and v2 are callable; v1 responses include Deprecation and Sunset.</li>
+        <li>Every enumerated error returns consistent Problem Details.</li>
+        <li>Three accepted ADRs include alternatives and tradeoffs.</li>
+        <li>Retry delays and circuit-open behavior are demonstrated by tests/logs.</li>
+      </ul>
+      <ul class="checklist">
+        <li>Bulk POST returns 202 and a stable status URL/job ID.</li>
+        <li>Status visibly transitions Queued → Processing → terminal state.</li>
+        <li>Recorded p95 response time is below 100 ms under stated conditions.</li>
+        <li>EM Review #1 findings and disposition are stored.</li>
+      </ul>
+    </div>
+
+    <h3>Required evidence</h3>
+    <p class="artifact">evidence/week-02/{error-matrix.md, versioning.http, polly-test.txt, bulk-latency.json, job-lifecycle.md, em-review-01.md}</p>
+    <div class="callout warn small"><strong>Scope boundary:</strong> Week 2 intentionally uses an in-memory queue. Restart durability and broker failure recovery are Week 3–4 outcomes.</div>
+    <div class="footer-label">Week 2 plan</div><div class="page-number">5 / 12</div>
+  </section>
+
+  <section class="page" id="page-6">
+    <div class="week-head"><div class="week-badge"><span>WEEK</span><span>3</span></div><div><div class="eyebrow">Message queues + architecture presentation</div><h2>Move asynchronous work out of process</h2><div class="tags">RabbitMQ · WorkerService · DLQ · React hooks · Communication</div></div></div>
+
+    <div class="callout"><strong>Week objective:</strong> replace the in-memory worker with a Docker-hosted RabbitMQ flow and a separate WorkerService while keeping job progress observable across processes.</div>
+
+    <h3>Target message flow</h3>
+    <div class="flow">
+      <div class="flow-box"><strong>API</strong><br><span class="small">Create persisted job; publish versioned command</span></div><div class="arrow">→</div>
+      <div class="flow-box"><strong>RabbitMQ</strong><br><span class="small">Main exchange/queue; durable message</span></div><div class="arrow">→</div>
+      <div class="flow-box"><strong>Worker</strong><br><span class="small">Manual ack; update SQL progress</span></div><div class="arrow">→</div>
+      <div class="flow-box"><strong>DLQ</strong><br><span class="small">Poison message after bounded attempts</span></div>
+    </div>
+
+    <h3>Five-day execution sequence</h3>
+    <div>
+      <div class="day-plan"><div class="day">Day 1</div><div><span class="task-id">W3-01</span>Write/approve the queue-topology ADR: exchange, queue, routing keys, durable message schema/version, manual acknowledgements, retry limit, poison classification, DLX/DLQ names, correlation IDs, and observability.</div><div class="hours">4 h</div></div>
+      <div class="day-plan"><div class="day">Day 2</div><div><span class="task-id">W3-02</span>Add RabbitMQ publisher and a separate .NET WorkerService. Persist job/progress in SQL so API and worker share state. Keep provider delivery behind <code>IEmailSender</code>.</div><div class="hours">4 h</div></div>
+      <div class="day-plan"><div class="day">Day 3</div><div><span class="task-id">W3-03</span>Add Dockerfiles and a Week 3 Compose stack for API, worker, RabbitMQ Management, and SQL Server. Add readiness waits, health checks, named volumes, and non-secret local defaults.</div><div class="hours">4 h</div></div>
+      <div class="day-plan"><div class="day">Day 4</div><div><span class="task-id">W3-04</span>Test happy path, worker restart/redelivery, broker restart, malformed message, poison delivery, DLQ inspection, and correlation. Capture the RabbitMQ UI DLQ proof.</div><div class="hours">4 h</div></div>
+      <div class="day-plan"><div class="day">Day 5</div><div><span class="task-id">W3-05</span>Correct the ten EM-supplied React hook snippets with explanations. Present the queue ADR for 15 minutes: context, options, tradeoffs, decision, failure demo, and questions.</div><div class="hours">4 h</div></div>
+    </div>
+
+    <h3>Exit criteria</h3>
+    <div class="grid-2">
+      <ul class="checklist">
+        <li>API and WorkerService are independently deployable processes.</li>
+        <li>Entire Week 3 stack starts on Docker Desktop.</li>
+        <li>Successful messages are acknowledged only after durable state change.</li>
+        <li>Poison message reaches named DLQ after bounded attempts.</li>
+      </ul>
+      <ul class="checklist">
+        <li>Status remains queryable from the API while worker processes.</li>
+        <li>Ten hook fixes cover dependencies, cleanup, and stale closures.</li>
+        <li>Gist link and explanations are submitted.</li>
+        <li>Architecture presentation is delivered and feedback recorded.</li>
+      </ul>
+    </div>
+
+    <h3>Required evidence</h3>
+    <p class="artifact">evidence/week-03/{topology.md, compose-start.txt, happy-path.md, dlq.png, restart-redelivery.md, react-gist-link.md, presentation.pdf, feedback.md}</p>
+    <div class="callout risk small"><strong>Design warning:</strong> RabbitMQ acknowledgement gives at-least-once delivery, not exactly once. Week 4 adds idempotency/inbox safeguards and transactional publication.</div>
+    <div class="footer-label">Week 3 plan</div><div class="page-number">6 / 12</div>
+  </section>
+
+  <section class="page" id="page-7">
+    <div class="week-head"><div class="week-badge"><span>WEEK</span><span>4</span></div><div><div class="eyebrow">Idempotency / Outbox + Next.js + GitHub Actions</div><h2>Make delivery durable and automate validation</h2><div class="tags">EF Core Outbox · Idempotency · Rendering models · CI/CD · GHCR</div></div></div>
+
+    <div class="callout"><strong>Week objective:</strong> ensure an accepted command survives broker downtime and duplicate client/queue delivery, then publish demonstrable backend and frontend artifacts through a passing pipeline.</div>
+
+    <h3>Correctness contract</h3>
+    <table class="compact">
+      <tr><th>Concern</th><th>Planned behavior</th><th>Acceptance proof</th></tr>
+      <tr><td>Client duplicate</td><td>Scope <code>X-Idempotency-Key</code> to event-producing POSTs, starting with bulk notifications. Same key + same request replays the original response/job.</td><td>Two sequential and two concurrent submissions create one job and return the same result.</td></tr>
+      <tr><td>Key misuse</td><td>Store request hash with key; same key + different body returns HTTP 409 Problem Details.</td><td>Postman/automated conflict scenario.</td></tr>
+      <tr><td>Broker unavailable</td><td>Store business change and Outbox row in one SQL transaction. Relay retries unpublished rows with backoff and publisher confirms.</td><td>Commit while broker is down; start broker; reconcile one published event and processed job.</td></tr>
+      <tr><td>Consumer duplicate</td><td>Use stable message ID and a unique processed-message/inbox record in the worker transaction.</td><td>Redeliver the same message; side effect occurs once.</td></tr>
+    </table>
+
+    <h3>Five-day execution sequence</h3>
+    <div>
+      <div class="day-plan"><div class="day">Day 1</div><div><span class="task-id">W4-01</span>Approve idempotency scope, key/hash/expiry schema, concurrency behavior, response replay, conflict response, and cleanup policy. Add migration and integration tests first.</div><div class="hours">4 h</div></div>
+      <div class="day-plan"><div class="day">Day 2</div><div><span class="task-id">W4-02</span>Add Outbox and worker Inbox records, transactional writes, relay leasing, retry metadata, publisher confirms, correlation, and safe cleanup. Document at-least-once semantics.</div><div class="hours">4 h</div></div>
+      <div class="day-plan"><div class="day">Day 3</div><div><span class="task-id">W4-03</span>Run broker-down, process-crash, concurrent-key, and duplicate-delivery tests. Reconcile database rows, RabbitMQ messages, job status, and notification side effects.</div><div class="hours">4 h</div></div>
+      <div class="day-plan"><div class="day">Day 4</div><div><span class="task-id">W4-04</span>Create the Next.js rendering lab: SSG, SSR, ISR, and CSR pages with visible render/fetch timestamps and concise explanations of cache/revalidation behavior.</div><div class="hours">4 h</div></div>
+      <div class="day-plan"><div class="day">Day 5</div><div><span class="task-id">W4-05</span>Create GitHub Actions from scratch: PR = restore/build/test only; main/tag = test, publish, containerize, and push immutable image to GHCR. Run EM Code Review #2.</div><div class="hours">4 h</div></div>
+    </div>
+
+    <h3>Exit criteria and evidence</h3>
+    <div class="grid-2">
+      <ul class="checklist">
+        <li>Idempotency replay, conflict, and concurrency checks pass.</li>
+        <li>No accepted event is lost during demonstrated broker downtime.</li>
+        <li>Duplicate delivery does not duplicate business side effects.</li>
+        <li>Four rendering pages show correct, visible timestamps.</li>
+      </ul>
+      <ul class="checklist">
+        <li>PR workflow never publishes an image.</li>
+        <li>Main/tag workflow pushes a commit-SHA image to GHCR.</li>
+        <li>Queue and DLQ remain demonstrable in Review #2.</li>
+        <li>Review findings and follow-up owners are recorded.</li>
+      </ul>
+    </div>
+    <p class="artifact">evidence/week-04/{idempotency.postman.json, broker-down.md, outbox-reconciliation.sql, duplicate-delivery.md, rendering-modes.md, actions-run.md, ghcr-image.txt, em-review-02.md}</p>
+    <div class="callout warn small"><strong>Sequencing correction:</strong> the original schedule places test backfill in Week 5, but Week 4 CI requires tests. Add the minimum critical unit/integration suite in Weeks 2–4; Week 5 expands coverage and balances the testing pyramid.</div>
+    <div class="footer-label">Week 4 plan</div><div class="page-number">7 / 12</div>
+  </section>
+
+  <section class="page" id="page-8">
+    <div class="week-head"><div class="week-badge"><span>WEEK</span><span>5</span></div><div><div class="eyebrow">Frontend polish + Compose and Vault provisioning</div><h2>Make the full stack repeatable on a clean machine</h2><div class="tags">React hooks · Angular OnPush · Docker Compose · Vault · xUnit</div></div></div>
+
+    <div class="callout"><strong>Week objective:</strong> close the frontend precision gap and provide an idempotent local provisioning path in which application secrets come from Vault rather than tracked configuration.</div>
+
+    <h3>Five-day execution sequence</h3>
+    <div>
+      <div class="day-plan"><div class="day">Day 1</div><div><span class="task-id">W5-01</span>Audit the Next.js app for effect dependencies, cleanup, cancellation, stale closures, and unnecessary effects. Add focused React tests and document each correction.</div><div class="hours">4 h</div></div>
+      <div class="day-plan"><div class="day">Day 2</div><div><span class="task-id">W5-02</span>Build a small Angular OnPush demo showing immutable vs mutated input, <code>async</code> pipe/observable update, signals, and explicit change marking. Prepare a five-minute explanation.</div><div class="hours">4 h</div></div>
+      <div class="day-plan"><div class="day">Day 3</div><div><span class="task-id">W5-03</span>Consolidate Compose services: network, volumes, SQL Server, RabbitMQ, Vault, API, worker, and frontends as needed. Add health checks and dependency readiness.</div><div class="hours">4 h</div></div>
+      <div class="day-plan"><div class="day">Day 4</div><div><span class="task-id">W5-04</span>Create re-runnable <code>provision.sh</code>: initialize/unseal Vault if needed, enable a secret engine, seed generated local secrets, configure least-privilege app auth, migrate database, and start/verify services.</div><div class="hours">4 h</div></div>
+      <div class="day-plan"><div class="day">Day 5</div><div><span class="task-id">W5-05</span>Expand xUnit unit and container-backed integration tests; document the testing pyramid. Rehearse twice from a clean Docker state and complete the frontend audit checkpoint.</div><div class="hours">4 h</div></div>
+    </div>
+
+    <h3>Vault and secret-handling guardrails</h3>
+    <div class="grid-2">
+      <div class="card"><h4>Do</h4><ul><li>Generate bootstrap material locally.</li><li>Store init/unseal and app credentials only in ignored local files or Docker secrets.</li><li>Give API/worker read access only to their paths.</li><li>Redact logs and evidence.</li></ul></div>
+      <div class="card"><h4>Do not</h4><ul><li>Commit root tokens, unseal keys, passwords, or API keys.</li><li>Use a fixed demo token in Compose.</li><li>Print secrets in CI or provisioning output.</li><li>Call a successful start “ready” without health checks.</li></ul></div>
+    </div>
+
+    <h3>Exit criteria</h3>
+    <div class="grid-2">
+      <ul class="checklist">
+        <li>React audit has fixes, explanations, and passing tests.</li>
+        <li>Angular demo visibly proves OnPush behavior.</li>
+        <li>Compose includes required network, volumes, RabbitMQ, SQL, and Vault.</li>
+        <li>No runtime secret is hardcoded in tracked files.</li>
+      </ul>
+      <ul class="checklist">
+        <li><code>provision.sh</code> succeeds twice without manual repair.</li>
+        <li>Clean-machine prerequisites and Windows shell choice are documented.</li>
+        <li>Unit and integration suites run locally and in CI.</li>
+        <li>Frontend audit feedback is captured and resolved/assigned.</li>
+      </ul>
+    </div>
+
+    <h3>Required evidence</h3>
+    <p class="artifact">evidence/week-05/{react-audit.md, angular-demo.mp4-or-link, compose-config.txt, vault-policy.hcl, secret-scan.txt, provision-run-1.txt, provision-run-2.txt, test-report.xml, frontend-audit.md}</p>
+    <div class="callout warn small"><strong>Environment decision:</strong> because the developer machine is Windows and the requirement names <code>provision.sh</code>, document Git Bash or WSL as a prerequisite and keep the script POSIX-compatible.</div>
+    <div class="footer-label">Week 5 plan</div><div class="page-number">8 / 12</div>
+  </section>
+
+  <section class="page" id="page-9">
+    <div class="week-head"><div class="week-badge"><span>WEEK</span><span>6</span></div><div><div class="eyebrow">Zero-downtime deploy + final readiness</div><h2>Prove promotion, rollback, and senior-level ownership</h2><div class="tags">Nginx · Blue/green · Health gates · Pipeline demo · Final assessment</div></div></div>
+
+    <div class="callout"><strong>Week objective:</strong> automate a health-gated deployment to the idle color, switch traffic without observed request failure, and restore the previous color with one command.</div>
+
+    <h3>Release sequence</h3>
+    <div class="flow">
+      <div class="flow-box"><strong>Build</strong><br><span class="small">Immutable SHA-tagged image</span></div><div class="arrow">→</div>
+      <div class="flow-box"><strong>Deploy idle</strong><br><span class="small">Blue or green; migrate safely</span></div><div class="arrow">→</div>
+      <div class="flow-box"><strong>Gate</strong><br><span class="small">Readiness + smoke checks</span></div><div class="arrow">→</div>
+      <div class="flow-box"><strong>Switch</strong><br><span class="small">Nginx reload; observe; rollback ready</span></div>
+    </div>
+
+    <h3>Five-day execution sequence</h3>
+    <div>
+      <div class="day-plan"><div class="day">Mon</div><div><span class="task-id">W6-01</span>Retake C#, ASP.NET Core, and React Skill IQ assessments; compare to Week 1 and send results. Freeze feature scope and confirm Friday assessment/demo rubric.</div><div class="hours">4 h</div></div>
+      <div class="day-plan"><div class="day">Tue</div><div><span class="task-id">W6-02</span>Add liveness/readiness endpoints. Configure Nginx, blue/green API services, active-color state, immutable image selection, and backward-compatible database migration rules.</div><div class="hours">4 h</div></div>
+      <div class="day-plan"><div class="day">Wed</div><div><span class="task-id">W6-03</span>Implement deploy-idle → health/smoke gate → Nginx switch → observation workflow. Abort automatically when the idle color is unhealthy.</div><div class="hours">4 h</div></div>
+      <div class="day-plan"><div class="day">Thu</div><div><span class="task-id">W6-04</span>Implement one-command rollback. Run continuous traffic through successful cutover, failed-health promotion, and rollback; collect availability and recovery results.</div><div class="hours">4 h</div></div>
+      <div class="day-plan"><div class="day">Fri</div><div><span class="task-id">W6-05</span>Live walkthrough: architecture, ADRs, API contracts, DLQ, Outbox recovery, frontends, Vault provisioning, CI image, blue→green switch, and rollback. Complete Grade 4 decision.</div><div class="hours">4 h</div></div>
+    </div>
+
+    <h3>Measurable demonstration contract</h3>
+    <table class="compact">
+      <tr><th>Scenario</th><th>Pass condition</th></tr>
+      <tr><td>Normal cutover</td><td>At least 1,000 requests at a documented steady rate across the switch, with zero network/non-2xx failures attributable to deployment.</td></tr>
+      <tr><td>Unhealthy idle color</td><td>Readiness/smoke gate fails; active upstream remains unchanged; pipeline reports a clear failure.</td></tr>
+      <tr><td>Rollback</td><td>One documented command restores the previous healthy color in ≤60 seconds, with the same traffic probe running.</td></tr>
+      <tr><td>Data compatibility</td><td>Both colors can operate during the switch; migration does not require an immediate destructive schema change.</td></tr>
+    </table>
+
+    <h3>Exit criteria and evidence</h3>
+    <div class="grid-2">
+      <ul class="checklist"><li>Retake scores and comparison are submitted.</li><li>Pipeline always deploys the idle color.</li><li>Unhealthy release cannot receive production traffic.</li><li>Cutover passes the stated availability probe.</li></ul>
+      <ul class="checklist"><li>Rollback is one command and meets the target.</li><li>Provisioning and pipeline demos are repeatable.</li><li>Final walkthrough covers all six-week artifacts.</li><li>Grade 4 go/no-go decision and actions are recorded.</li></ul>
+    </div>
+    <p class="artifact">evidence/week-06/{skill-iq-comparison.md, pipeline-run.md, cutover-results.json, failed-health.md, rollback-results.json, final-demo-script.md, readiness-assessment.md}</p>
+    <div class="footer-label">Week 6 plan</div><div class="page-number">9 / 12</div>
+  </section>
+
+  <section class="page" id="page-10">
+    <div class="eyebrow">Quality management</div>
+    <h2>Definition of Done and verification strategy</h2>
+
+    <div class="callout"><strong>Release rule:</strong> a feature is not done when it merely runs once. It is done when its contract is automated where practical, its failure path is demonstrated, its operation is documented, and its evidence is reviewable.</div>
+
+    <h3>Definition of Done for every engineering item</h3>
+    <div class="grid-2">
+      <ul class="checklist">
+        <li>Requirement and acceptance condition are linked in the PR.</li>
+        <li>Code builds with zero warnings introduced by the change.</li>
+        <li>Unit/integration/contract tests appropriate to the risk pass.</li>
+        <li>Negative and recovery paths are tested, not only happy path.</li>
+        <li>Public API/OpenAPI and configuration docs are current.</li>
+      </ul>
+      <ul class="checklist">
+        <li>No secret or personal token is tracked or printed.</li>
+        <li>Structured logs include correlation/job/message identifiers.</li>
+        <li>Migration and rollback/recovery implications are documented.</li>
+        <li>Evidence is saved under the correct week directory.</li>
+        <li>Review findings are fixed or assigned with owner/date.</li>
+      </ul>
+    </div>
+
+    <h3>Test pyramid target by Week 5</h3>
+    <table>
+      <tr><th style="width:20%">Layer</th><th style="width:22%">Purpose</th><th>Priority scenarios</th><th style="width:16%">Execution</th></tr>
+      <tr><td><strong>Unit</strong><br><span class="muted">largest set</span></td><td>Domain and deterministic application behavior</td><td>Validation, status transitions, request hashing, idempotency decisions, Outbox state, retry classification.</td><td>Every build/PR</td></tr>
+      <tr><td><strong>Integration</strong><br><span class="muted">focused set</span></td><td>Database, HTTP pipeline, broker, Vault boundaries</td><td>Problem Details, SQL transactions, Outbox relay, Inbox dedupe, Rabbit ack/DLQ, migrations, secret retrieval.</td><td>PR and main</td></tr>
+      <tr><td><strong>End-to-end</strong><br><span class="muted">small critical set</span></td><td>Cross-service business and operational flows</td><td>Bulk submit-to-completion, broker outage recovery, Compose provisioning, blue/green cutover and rollback.</td><td>Main/nightly/demo</td></tr>
+      <tr><td><strong>Manual evidence</strong></td><td>UI, communication, assessment</td><td>Swagger review, RabbitMQ DLQ UI, rendering timestamps, React Gist, Angular demo, architecture presentation, EM gates.</td><td>Milestones</td></tr>
+    </table>
+
+    <h3>Milestone gates</h3>
+    <table class="compact">
+      <tr><th>Gate</th><th>Must be demonstrable</th><th>Approver / record</th></tr>
+      <tr><td>W2 Review #1</td><td>Documented API, v1/v2, all error shapes, 202 lifecycle, Polly failure behavior, three ADRs.</td><td>EM · <span class="artifact">em-review-01.md</span></td></tr>
+      <tr><td>W3 Presentation</td><td>15-minute ADR story with live queue/DLQ and explicit tradeoffs.</td><td>EM/team · feedback record</td></tr>
+      <tr><td>W4 Review #2</td><td>Idempotency, Outbox recovery, queue/DLQ, rendering lab, tests, passing CI and GHCR image.</td><td>EM · <span class="artifact">em-review-02.md</span></td></tr>
+      <tr><td>W5 Frontend/infra</td><td>Hook precision, OnPush, re-runnable provisioning, Vault-secret proof, test pyramid.</td><td>EM/frontend reviewer</td></tr>
+      <tr><td>W6 Readiness</td><td>Pipeline, health gate, cutover, rollback, full architecture ownership and assessment results.</td><td>EM · go/no-go record</td></tr>
+    </table>
+    <div class="footer-label">Quality gates</div><div class="page-number">10 / 12</div>
+  </section>
+
+  <section class="page" id="page-11">
+    <div class="eyebrow">Delivery risk management</div>
+    <h2>Dependencies, risks, and mitigations</h2>
+
+    <table>
+      <thead><tr><th style="width:23%">Risk / dependency</th><th style="width:11%">Level</th><th>Mitigation and trigger</th><th style="width:18%">Owner / due</th></tr></thead>
+      <tbody>
+        <tr><td>Start date and EM gates are not scheduled.</td><td><span class="status blocked">HIGH</span></td><td>Book both reviews, W3 presentation, W5 audit, and W6 Friday assessment before Week 1. Escalate if any gate has no slot by W1 Day 2.</td><td>EM + Bethoven<br>Before W1</td></tr>
+        <tr><td>Ten React snippets and Grade 4 rubric are external.</td><td><span class="status blocked">HIGH</span></td><td>Request snippets by W2 and rubric by W4. If unavailable, use an agreed substitute set and document the deviation.</td><td>EM<br>W2 / W4</td></tr>
+        <tr><td>Approximately 120 hours for a broad full-stack program.</td><td><span class="status partial">MEDIUM</span></td><td>Timebox courses, reuse the anchor project, enforce weekly scope, and prioritize acceptance paths. Carry work only through an explicit review decision.</td><td>Bethoven<br>Daily</td></tr>
+        <tr><td>Current worktree has many uncommitted moves.</td><td><span class="status blocked">HIGH</span></td><td>Review, build, and checkpoint the local state before architectural splitting. Never clean/reset files without confirming ownership.</td><td>Bethoven<br>W1 Day 1</td></tr>
+        <tr><td>No automated test projects currently found.</td><td><span class="status blocked">HIGH</span></td><td>Add critical tests in Weeks 1–4 so CI has value; expand in Week 5. Do not postpone all test work to Week 5.</td><td>Bethoven<br>Start W1</td></tr>
+        <tr><td>Retries or at-least-once delivery can duplicate email.</td><td><span class="status partial">MEDIUM</span></td><td>Document at-least-once Rabbit delivery. Use stable provider/message IDs plus Inbox/idempotent side effects; do not enable unsafe POST retries without a provider deduplication contract.</td><td>Bethoven<br>W2–W4</td></tr>
+        <tr><td>Vault bootstrap can leak root material.</td><td><span class="status blocked">HIGH</span></td><td>Generate locally, store only in ignored/Docker-secret locations, redact output, use least-privilege app auth, and run a secret scan.</td><td>Bethoven<br>W5</td></tr>
+        <tr><td><code>provision.sh</code> on Windows is underspecified.</td><td><span class="status partial">MEDIUM</span></td><td>Standardize on Git Bash or WSL, validate line endings and POSIX syntax, list prerequisites, and test on a clean profile.</td><td>Bethoven<br>W5</td></tr>
+        <tr><td>Blue/green with shared database can break old color.</td><td><span class="status blocked">HIGH</span></td><td>Use expand/contract migrations; keep both versions compatible during cutover; block promotion on migration/readiness failures.</td><td>Bethoven<br>W6</td></tr>
+        <tr><td>GHCR/pipeline credentials or permissions unavailable.</td><td><span class="status partial">MEDIUM</span></td><td>Verify package permissions by W3; use GitHub-provided token with least privilege; never use a personal token unless approved.</td><td>Bethoven + EM<br>W3</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Decisions to confirm before execution</h3>
+    <ol>
+      <li>Calendar start date, five-day working pattern, reviewers, and demo slots.</li>
+      <li>Whether Week 1’s decision page is separate from ADR 001.</li>
+      <li>Exact v1/v2 semantic difference, if the EM expects more than parallel routes.</li>
+      <li>RabbitMQ client/library and topology; job-retention period; retry and DLQ thresholds.</li>
+      <li>Idempotency endpoint scope and retention; Next.js/router version; GitHub branch and image conventions.</li>
+      <li>Clean-machine definition, Git Bash versus WSL, Vault mode, and final readiness rubric.</li>
+    </ol>
+
+    <div class="callout risk"><strong>Stop-the-line criteria:</strong> exposed secret, data-loss evidence, destructive migration incompatible with the active color, failing main build, or a health gate that can promote an unhealthy release. These must be corrected before proceeding.</div>
+    <div class="footer-label">Risk register</div><div class="page-number">11 / 12</div>
+  </section>
+
+  <section class="page dense" id="page-12">
+    <div class="eyebrow">Execution control</div>
+    <h2>How this PDF becomes the working baseline</h2>
+
+    <h3>Kickoff checklist</h3>
+    <div class="grid-2">
+      <ul class="checklist">
+        <li>EM confirms start date, reviewers, external inputs, and Grade 4 rubric.</li>
+        <li>Engineer records environment versions and validates required accounts/tools.</li>
+        <li>Current local changes are reviewed and checkpointed safely.</li>
+        <li>Week 1 branch/PR and evidence directory are created.</li>
+      </ul>
+      <ul class="checklist">
+        <li>Skill IQ baseline timing is confirmed before course access.</li>
+        <li>Daily EOD message time and channel are agreed.</li>
+        <li>Risk owners accept the register on page 11.</li>
+        <li>Any approved deviation is written into the plan/ADR.</li>
+      </ul>
+    </div>
+
+    <h3>Weekly control record</h3>
+    <table>
+      <tr><th style="width:10%">Week</th><th>Planned outcome</th><th style="width:17%">Gate date</th><th style="width:19%">Result</th></tr>
+      <tr><td>1</td><td>Documented API foundation + architecture decision</td><td>____________</td><td>☐ Pass ☐ Carry ☐ Replan</td></tr>
+      <tr><td>2</td><td>Error/version/async proof + EM Review #1</td><td>____________</td><td>☐ Pass ☐ Carry ☐ Replan</td></tr>
+      <tr><td>3</td><td>RabbitMQ/DLQ + hooks Gist + presentation</td><td>____________</td><td>☐ Pass ☐ Carry ☐ Replan</td></tr>
+      <tr><td>4</td><td>Idempotency/Outbox + Next.js + CI + Review #2</td><td>____________</td><td>☐ Pass ☐ Carry ☐ Replan</td></tr>
+      <tr><td>5</td><td>Frontend audit + Compose/Vault provisioning</td><td>____________</td><td>☐ Pass ☐ Carry ☐ Replan</td></tr>
+      <tr><td>6</td><td>Blue/green demo + Grade 4 decision</td><td>____________</td><td>☐ Pass ☐ Carry ☐ Replan</td></tr>
+    </table>
+
+    <h3>Daily EOD template</h3>
+    <div class="card tight">
+      <p><strong>Done:</strong> task IDs completed, PR/commit, tests run, evidence path.</p>
+      <p><strong>Blocked:</strong> exact blocker, impact, checks already tried, owner/decision needed.</p>
+      <p><strong>Tomorrow:</strong> next task IDs, planned validation, review request.</p>
+      <p><strong>Risk change:</strong> new/escalated/closed risk and mitigation.</p>
+    </div>
+
+    <h3>Final evidence index</h3>
+    <table class="compact">
+      <tr><th>Evidence family</th><th>Expected final artifacts</th></tr>
+      <tr><td>Architecture</td><td>Diagram/export, ADR set, presentation deck, review feedback.</td></tr>
+      <tr><td>API and resilience</td><td>OpenAPI, error matrix, version checks, Polly transcript, latency and job lifecycle results.</td></tr>
+      <tr><td>Messaging correctness</td><td>Topology, DLQ proof, Outbox reconciliation, broker outage and duplicate-delivery results.</td></tr>
+      <tr><td>Frontend</td><td>React Gist, rendering-mode lab, hook audit, Angular OnPush demo.</td></tr>
+      <tr><td>Delivery and security</td><td>CI runs, GHCR image, Compose/Vault proof, secret scan, provisioning transcripts.</td></tr>
+      <tr><td>Operations/readiness</td><td>Health-gate failure, cutover/rollback metrics, demo script, assessment and go/no-go record.</td></tr>
+    </table>
+
+    <div class="callout good"><strong>Plan completion condition:</strong> all six weekly gates are passed or have explicitly accepted remediation, all required external events are recorded, and the final readiness decision is signed off by the EM.</div>
+
+    <div class="footer-label">Execution baseline approval</div><div class="page-number">12 / 12</div>
+  </section>
+
+</body>
+</html>

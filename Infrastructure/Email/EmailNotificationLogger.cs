@@ -2,8 +2,8 @@ namespace NSA.Infrastructure.Email;
 
 public sealed class EmailNotificationLogger(ILogger<EmailNotificationLogger> logger)
 {
-    public void LogQueued(string recipientEmail, string subject, string body)
+    public void LogDeliveryNotAttempted()
     {
-        logger.LogInformation("Email notification queued for {Recipient}. Subject: {Subject}. Body: {Body}", recipientEmail, subject, body);
+        logger.LogInformation("Email delivery was not attempted because the outbound provider is disabled; notification intent remains pending");
     }
 }

@@ -1,0 +1,34 @@
+@baseUrl = http://127.0.0.1:5099
+
+### Swagger v1 JSON — expect 200
+GET {{baseUrl}}/swagger/v1/swagger.json
+
+### Swagger v2 JSON — expect 200
+GET {{baseUrl}}/swagger/v2/swagger.json
+
+### v1 — expect 200 plus Deprecation and Sunset
+GET {{baseUrl}}/api/v1/products
+
+### v1.0 error — expect 404 Problem Details plus Deprecation and Sunset
+GET {{baseUrl}}/api/v1.0/notifications/2147483647
+
+### v2 — expect 200 without retirement headers
+GET {{baseUrl}}/api/v2/products
+
+### Unversioned compatibility route — expect 200
+GET {{baseUrl}}/api/products
+
+### Unsupported API version — expect 4xx Problem Details
+GET {{baseUrl}}/api/v9/products
+
+### Model validation — expect 400 ValidationProblemDetails
+POST {{baseUrl}}/api/v2/notifications
+Content-Type: application/json
+
+{}
+
+### Unsupported media type — expect 415 Problem Details
+POST {{baseUrl}}/api/v2/notifications
+Content-Type: text/plain
+
+plain text

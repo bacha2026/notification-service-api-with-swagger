@@ -1,0 +1,101 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="title description">
+  <title id="title">Notification Service API - Week 2 runtime architecture</title>
+  <desc id="description">Versioned HTTP requests flow through Problem Details middleware and controllers to application services and SQL Server. Bulk requests enter a bounded in-memory channel consumed by a background worker. Email delivery uses a typed HTTP client with timeout, retry, and circuit breaker policies.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#315a73"/>
+    </marker>
+    <style>
+      .title { font: 700 34px 'Segoe UI', Arial, sans-serif; fill: #12304a; }
+      .subtitle { font: 400 18px 'Segoe UI', Arial, sans-serif; fill: #536574; }
+      .lane-title { font: 700 20px 'Segoe UI', Arial, sans-serif; fill: #12304a; }
+      .box-title { font: 700 18px 'Segoe UI', Arial, sans-serif; fill: #12304a; }
+      .text { font: 400 15px 'Segoe UI', Arial, sans-serif; fill: #273746; }
+      .small { font: 400 13px 'Segoe UI', Arial, sans-serif; fill: #445765; }
+      .box { stroke: #315a73; stroke-width: 2; rx: 12; }
+      .edge { fill: none; stroke: #315a73; stroke-width: 3; marker-end: url(#arrow); }
+      .edge-dashed { fill: none; stroke: #9a5a00; stroke-width: 3; stroke-dasharray: 9 7; marker-end: url(#arrow); }
+    </style>
+  </defs>
+
+  <rect width="1600" height="900" fill="#ffffff"/>
+  <text x="60" y="60" class="title">Notification Service API - Week 2 Runtime Architecture</text>
+  <text x="60" y="92" class="subtitle">Verified baseline: versioned contracts, RFC 7807 errors, bounded background work, and resilient outbound calls</text>
+
+  <rect x="45" y="125" width="1510" height="235" rx="18" fill="#eef5fb" stroke="#8aabc2" stroke-width="2"/>
+  <text x="70" y="158" class="lane-title">Synchronous API path</text>
+
+  <rect class="box" x="80" y="190" width="190" height="105" fill="#ffffff"/>
+  <text x="175" y="220" text-anchor="middle" class="box-title">API Consumer</text>
+  <text x="175" y="247" text-anchor="middle" class="text">/api/v1 or /api/v2</text>
+  <text x="175" y="271" text-anchor="middle" class="small">Swagger / client / Postman</text>
+
+  <rect class="box" x="350" y="175" width="250" height="135" fill="#fff8e8"/>
+  <text x="475" y="207" text-anchor="middle" class="box-title">HTTP pipeline</text>
+  <text x="475" y="234" text-anchor="middle" class="text">URL API versioning</text>
+  <text x="475" y="258" text-anchor="middle" class="text">Deprecation + Sunset (v1)</text>
+  <text x="475" y="282" text-anchor="middle" class="text">Problem Details + traceId</text>
+
+  <rect class="box" x="680" y="190" width="215" height="105" fill="#f0eafa"/>
+  <text x="788" y="220" text-anchor="middle" class="box-title">Controllers</text>
+  <text x="788" y="247" text-anchor="middle" class="text">HTTP contract + status</text>
+  <text x="788" y="271" text-anchor="middle" class="small">Cart · Orders · Products · Notifications</text>
+
+  <rect class="box" x="975" y="190" width="215" height="105" fill="#eaf7ec"/>
+  <text x="1083" y="220" text-anchor="middle" class="box-title">Application services</text>
+  <text x="1083" y="247" text-anchor="middle" class="text">Workflow + domain rules</text>
+  <text x="1083" y="271" text-anchor="middle" class="small">Repository abstractions</text>
+
+  <rect class="box" x="1270" y="190" width="225" height="105" fill="#e8f2ff"/>
+  <text x="1383" y="220" text-anchor="middle" class="box-title">SQL Server</text>
+  <text x="1383" y="247" text-anchor="middle" class="text">EF Core repositories</text>
+  <text x="1383" y="271" text-anchor="middle" class="small">Migration on startup (configurable)</text>
+
+  <path class="edge" d="M270 242 H350"/><path class="edge" d="M600 242 H680"/><path class="edge" d="M895 242 H975"/><path class="edge" d="M1190 242 H1270"/>
+
+  <rect x="45" y="390" width="1510" height="350" rx="18" fill="#f6f8fa" stroke="#9eabb5" stroke-width="2"/>
+  <text x="70" y="425" class="lane-title">Asynchronous bulk-notification path</text>
+
+  <rect class="box" x="80" y="465" width="210" height="120" fill="#ffffff"/>
+  <text x="185" y="497" text-anchor="middle" class="box-title">POST notifications/bulk</text>
+  <text x="185" y="527" text-anchor="middle" class="text">Validate ≤100 items</text>
+  <text x="185" y="551" text-anchor="middle" class="text">Return 202 + jobId</text>
+  <text x="185" y="575" text-anchor="middle" class="small">Version-preserving Location</text>
+
+  <rect class="box" x="370" y="465" width="220" height="120" fill="#fff8e8"/>
+  <text x="480" y="497" text-anchor="middle" class="box-title">Bulk job service</text>
+  <text x="480" y="527" text-anchor="middle" class="text">Bounded Channel</text>
+  <text x="480" y="551" text-anchor="middle" class="text">Atomic admission + TTL</text>
+  <text x="480" y="575" text-anchor="middle" class="small">Terminal state releases payload</text>
+
+  <rect class="box" x="670" y="465" width="220" height="120" fill="#f0eafa"/>
+  <text x="780" y="497" text-anchor="middle" class="box-title">BackgroundService</text>
+  <text x="780" y="527" text-anchor="middle" class="text">Scoped item processing</text>
+  <text x="780" y="551" text-anchor="middle" class="text">Safe counters + errors</text>
+  <text x="780" y="575" text-anchor="middle" class="small">Cancelled on graceful shutdown</text>
+
+  <rect class="box" x="970" y="445" width="245" height="160" fill="#eaf7ec"/>
+  <text x="1093" y="478" text-anchor="middle" class="box-title">Notification processing</text>
+  <text x="1093" y="510" text-anchor="middle" class="text">Email → Dispatcher</text>
+  <text x="1093" y="534" text-anchor="middle" class="small">pending → accepted? → sent</text>
+  <text x="1093" y="565" text-anchor="middle" class="text">Other channel → Service</text>
+  <text x="1093" y="589" text-anchor="middle" class="small">persist notification record</text>
+
+  <rect class="box" x="1295" y="435" width="220" height="180" fill="#ffeceb"/>
+  <text x="1405" y="468" text-anchor="middle" class="box-title">Typed outbound client</text>
+  <text x="1405" y="498" text-anchor="middle" class="text">Per-attempt timeout</text>
+  <text x="1405" y="522" text-anchor="middle" class="text">3 exponential retries</text>
+  <text x="1405" y="546" text-anchor="middle" class="text">Shared circuit breaker</text>
+  <text x="1405" y="575" text-anchor="middle" class="small">Disabled: NotAttempted · pending</text>
+  <text x="1405" y="597" text-anchor="middle" class="small">No PII/network · contract unverified</text>
+
+  <path class="edge" d="M290 525 H370"/><path class="edge" d="M590 525 H670"/><path class="edge" d="M890 525 H970"/><path class="edge" d="M1215 525 H1295"/>
+  <rect class="box" x="970" y="635" width="245" height="65" fill="#e8f2ff"/>
+  <text x="1093" y="663" text-anchor="middle" class="box-title">SQL persistence</text>
+  <text x="1093" y="687" text-anchor="middle" class="small">NotificationDbContext</text>
+  <path class="edge" d="M1093 605 V635"/>
+
+  <rect x="80" y="780" width="1435" height="75" rx="12" fill="#fff5df" stroke="#bb7600" stroke-width="2"/>
+  <text x="105" y="811" class="box-title">Week 2 boundary</text>
+  <text x="105" y="838" class="text">Jobs and the Channel are process-local and do not survive restart. RabbitMQ + separate Worker arrive in Week 3; transactional Outbox and durable recovery arrive in Week 4.</text>
+</svg>

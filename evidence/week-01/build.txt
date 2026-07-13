@@ -1,0 +1,41 @@
+WEEK 1 LOCAL BUILD AND STARTUP EVIDENCE
+=======================================
+
+Verified at (UTC): 2026-07-13 05:06–05:10
+Repository: local repository root (absolute workstation path intentionally omitted)
+Branch: main
+Starting commit: 91d94c0cd61d384d819dffae264e7a59dde2bd61
+Publication note: this verification was captured before publication; use the repository history for the resulting commit. No PR or human review is claimed by this record.
+
+Environment
+-----------
+OS: Windows 10.0.26200, win-x64
+Pinned SDK: 8.0.422 (selected through global.json)
+Target framework: net8.0
+ASP.NET Core runtime: 8.0.28
+SQL Server: 17.0.1000.7, Enterprise Evaluation Edition (64-bit), local default instance
+Database: NotificationServiceDb; Windows authentication; one applied EF migration
+
+Commands and results
+--------------------
+dotnet restore NSA.csproj --nologo
+PASS — restore completed successfully in 1.1 seconds
+
+dotnet build NSA.csproj --no-restore --nologo
+PASS — 0 warnings, 0 errors; 2.36 seconds
+
+dotnet test tests\NSA.Tests\NSA.Tests.csproj --no-build --no-restore --nologo --verbosity minimal
+PASS — 72 passed, 0 failed, 0 skipped; 4 seconds
+
+dotnet run --no-build --project NSA.csproj --no-launch-profile --urls http://127.0.0.1:5099
+PASS — SQL connection succeeded; __EFMigrationsHistory read; no migration was pending; API listened on port 5099
+
+sqlcmd -S . -E -C -d NotificationServiceDb -Q "...SERVERPROPERTY...; ...__EFMigrationsHistory..."
+PASS — server version/edition returned; AppliedMigrations = 1
+
+dotnet list NSA.csproj package --vulnerable --include-transitive
+PASS — no vulnerable packages were reported by the configured NuGet source
+
+External evidence still required
+--------------------------------
+Skill IQ baselines, a GitHub branch/PR and commit for this work, the 30-minute design exercise, and human/EM review are not locally provable and remain pending.

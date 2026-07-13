@@ -1,0 +1,34 @@
+WEEK 2 POLLY / OUTBOUND-CALL VERIFICATION
+=========================================
+
+Verified: 2026-07-13 under .NET SDK 8.0.422
+Overall suite: 72 passed, 0 failed, 0 skipped
+Provider mode: disabled in application settings; deterministic in-memory handlers used for policy tests
+
+Implemented policy composition
+------------------------------
+Outer: shared circuit breaker (3 failed logical sends, 30-second default break)
+Middle: 3 exponential retries after the first attempt (400 ms, 800 ms, 1600 ms defaults)
+Inner: 10-second per-attempt Polly timeout
+HttpClient-wide timeout: infinite so it does not cancel the complete retry sequence
+
+Verified scenarios in tests/NSA.Tests/PostboundResilienceTests.cs
+----------------------------------------------------------------
+PASS transient failure followed by success
+PASS non-transient HTTP 4xx is not retried
+PASS exact retries/backoff followed by shared circuit opening
+PASS per-attempt timeout is retryable
+PASS caller cancellation stops without retry or breaker pollution
+PASS half-open recovery trial resets a recovered circuit and reopens after a failed trial
+
+Verified adapter scenarios in tests/NSA.Tests/PostboundEmailSenderTests.cs
+----------------------------------------------------------------------------
+PASS disabled adapter makes zero network calls and returns NotAttempted
+PASS disabled log contains no recipient, subject, or body
+PASS enabled adapter sends the expected bearer-authenticated JSON request
+PASS idempotency key is stable across physical retries of one logical send
+PASS provider failure and caller cancellation are surfaced correctly
+
+Safety boundary
+---------------
+The Postbound base URL/path/auth/payload and provider handling of Idempotency-Key are not verified against a real sandbox. Postbound:Enabled must remain false until the provider contract and deduplication guarantee are proven.
