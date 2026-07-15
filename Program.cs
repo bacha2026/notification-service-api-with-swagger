@@ -58,6 +58,7 @@ builder.Services.AddSwaggerGen(options =>
     var xmlFile = $"{Assembly.GetExecutingAssembly().GetName().Name}.xml";
     var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
     options.IncludeXmlComments(xmlPath, includeControllerXmlComments: true);
+    options.SchemaFilter<ProblemDetailsSchemaFilter>();
     options.DocInclusionPredicate((documentName, apiDescription) =>
     {
         if (!string.Equals(apiDescription.GroupName, documentName, StringComparison.OrdinalIgnoreCase))
