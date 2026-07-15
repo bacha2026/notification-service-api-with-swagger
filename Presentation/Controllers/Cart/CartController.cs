@@ -13,6 +13,7 @@ namespace NSA.Presentation.Controllers;
 public sealed class CartController(ICartService cartService) : ControllerBase
 {
     /// <summary>Gets the current cart for a visitor.</summary>
+    /// <remarks>Pass the visitor's email address in the route. Use the returned cart item ids when updating or removing individual items.</remarks>
     /// <response code="200">Returns the visitor cart with line-item subtotals and total amount.</response>
     [HttpGet("{visitorEmail}")]
     [ProducesResponseType(typeof(CartDto), StatusCodes.Status200OK)]
@@ -22,6 +23,7 @@ public sealed class CartController(ICartService cartService) : ControllerBase
     }
 
     /// <summary>Adds a product to a visitor cart or increases the existing quantity.</summary>
+    /// <remarks>Send the visitor email, product id, and quantity in the request body. If the product is already in the visitor's cart, the supplied quantity is added to its current quantity.</remarks>
     /// <response code="200">Returns the updated visitor cart.</response>
     /// <response code="400">The product quantity is invalid.</response>
     /// <response code="404">The requested product does not exist.</response>
@@ -36,6 +38,7 @@ public sealed class CartController(ICartService cartService) : ControllerBase
     }
 
     /// <summary>Updates the quantity of a cart line item.</summary>
+    /// <remarks>Pass the cart item id—not the product id—in the route and send the desired total quantity in the request body. Use the cart lookup endpoint to find the cart item id.</remarks>
     /// <response code="200">Returns the updated visitor cart.</response>
     /// <response code="400">The product quantity is invalid.</response>
     /// <response code="404">The requested cart line item does not exist.</response>
@@ -50,6 +53,7 @@ public sealed class CartController(ICartService cartService) : ControllerBase
     }
 
     /// <summary>Removes a cart line item.</summary>
+    /// <remarks>Pass the cart item id—not the product id—in the route. A successful request permanently removes that line from the visitor's cart and returns no response body.</remarks>
     /// <response code="204">The cart line item was removed.</response>
     /// <response code="404">The requested cart line item does not exist.</response>
     [HttpDelete("items/{cartItemId:int}")]

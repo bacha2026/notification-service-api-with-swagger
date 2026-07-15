@@ -13,6 +13,7 @@ namespace NSA.Presentation.Controllers;
 public sealed class NotificationsController(INotificationService notificationService) : ControllerBase
 {
     /// <summary>Gets notifications, optionally filtered by recipient email or order id.</summary>
+    /// <remarks>Call without query parameters to list all notifications, or supply recipientEmail, orderId, or both to narrow the results. When both filters are supplied, only notifications matching both are returned.</remarks>
     /// <response code="200">Returns matching notifications.</response>
     [HttpGet]
     [ProducesResponseType(typeof(IEnumerable<NotificationDto>), StatusCodes.Status200OK)]
@@ -23,6 +24,7 @@ public sealed class NotificationsController(INotificationService notificationSer
     }
 
     /// <summary>Gets one notification by id.</summary>
+    /// <remarks>Pass the notification id in the route. Use this operation when a client needs the complete current record after obtaining an id from the list or create endpoint.</remarks>
     /// <response code="200">Returns the requested notification.</response>
     /// <response code="404">The requested notification does not exist.</response>
     [HttpGet("{id:int}")]
@@ -35,6 +37,7 @@ public sealed class NotificationsController(INotificationService notificationSer
     }
 
     /// <summary>Creates a notification record.</summary>
+    /// <remarks>Send the recipient, delivery channel, subject, and body in the request. Include orderId only when the notification relates to an existing order. The Location response header identifies the created notification.</remarks>
     /// <response code="201">The notification was created.</response>
     /// <response code="400">The notification request is invalid.</response>
     [HttpPost]
@@ -52,6 +55,7 @@ public sealed class NotificationsController(INotificationService notificationSer
     }
 
     /// <summary>Updates a notification record.</summary>
+    /// <remarks>Pass the notification id in the route and send the complete replacement set of editable fields, including isRead. Omitted fields are not preserved because this is a full update.</remarks>
     /// <response code="200">The notification was updated.</response>
     /// <response code="400">The notification request is invalid.</response>
     /// <response code="404">The requested notification does not exist.</response>
@@ -66,6 +70,7 @@ public sealed class NotificationsController(INotificationService notificationSer
     }
 
     /// <summary>Deletes a notification record.</summary>
+    /// <remarks>Pass the notification id in the route. A successful request permanently deletes the record and returns no response body.</remarks>
     /// <response code="204">The notification was deleted.</response>
     /// <response code="404">The requested notification does not exist.</response>
     [HttpDelete("{id:int}")]
@@ -78,6 +83,7 @@ public sealed class NotificationsController(INotificationService notificationSer
     }
 
     /// <summary>Queues a batch of notification records for asynchronous processing.</summary>
+    /// <remarks>Send between 1 and 100 notifications in the request body. Processing continues in the background after the endpoint returns; save the returned jobId or Location header and use the bulk status endpoint to monitor progress.</remarks>
     /// <response code="202">The job was accepted. Use the status endpoint and returned job id to monitor it.</response>
     /// <response code="400">The batch is empty, too large, or contains an invalid notification.</response>
     /// <response code="503">The in-memory queue is temporarily at capacity.</response>
@@ -97,6 +103,7 @@ public sealed class NotificationsController(INotificationService notificationSer
     }
 
     /// <summary>Gets the current progress of an asynchronous bulk notification job.</summary>
+    /// <remarks>Pass the jobId returned by the bulk creation endpoint. Poll this endpoint until the status is Completed or CompletedWithErrors, then inspect the succeeded and failed counters. Completed jobs are retained only temporarily.</remarks>
     /// <response code="200">Returns the job's current counters and lifecycle state.</response>
     /// <response code="404">The requested job does not exist or is no longer retained.</response>
     [HttpGet("bulk/{jobId:guid}")]

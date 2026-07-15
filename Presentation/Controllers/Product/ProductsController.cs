@@ -13,6 +13,7 @@ namespace NSA.Presentation.Controllers;
 public sealed class ProductsController(IProductService productService) : ControllerBase
 {
     /// <summary>Gets the product catalog data, including image URLs, names, prices, descriptions, and available quantities.</summary>
+    /// <remarks>Call this endpoint without parameters to populate a product listing or catalog view. Use each returned id with the product detail or cart endpoints.</remarks>
     /// <response code="200">Returns all active products for display in a product grid.</response>
     [HttpGet]
     [ProducesResponseType(typeof(IEnumerable<ProductDto>), StatusCodes.Status200OK)]
@@ -23,6 +24,7 @@ public sealed class ProductsController(IProductService productService) : Control
     }
 
     /// <summary>Gets one product detail record for the product detail page.</summary>
+    /// <remarks>Pass the product id in the route. The response includes current price and available quantity, which should be refreshed before adding the product to a cart.</remarks>
     /// <response code="200">Returns the selected product detail.</response>
     /// <response code="404">The requested product does not exist.</response>
     [HttpGet("{id:int}")]
@@ -35,6 +37,7 @@ public sealed class ProductsController(IProductService productService) : Control
     }
 
     /// <summary>Creates a product catalog record.</summary>
+    /// <remarks>Send all product fields in the request body. Price and available quantity must be zero or greater, and imageUrl must be a valid absolute URL. The Location response header identifies the new product.</remarks>
     /// <response code="201">The product was created.</response>
     /// <response code="400">The product request is invalid.</response>
     [HttpPost]
@@ -52,6 +55,7 @@ public sealed class ProductsController(IProductService productService) : Control
     }
 
     /// <summary>Updates a product catalog record.</summary>
+    /// <remarks>Pass the existing product id in the route and send the complete replacement set of editable product fields. Omitted fields are not preserved because this is a full update.</remarks>
     /// <response code="200">The product was updated.</response>
     /// <response code="400">The product request is invalid.</response>
     /// <response code="404">The requested product does not exist.</response>

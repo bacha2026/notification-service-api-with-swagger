@@ -13,6 +13,7 @@ namespace NSA.Presentation.Controllers;
 public sealed class OrdersController(IOrderService orderService) : ControllerBase
 {
     /// <summary>Gets all orders for a visitor, including product names, prices, quantities, subtotals, totals, and statuses.</summary>
+    /// <remarks>Supply the visitor's email address in the visitorEmail query parameter. Use this endpoint for order history and the returned order ids for detailed tracking.</remarks>
     /// <response code="200">Returns the visitor order history.</response>
     [HttpGet]
     [ProducesResponseType(typeof(IEnumerable<OrderDto>), StatusCodes.Status200OK)]
@@ -23,6 +24,7 @@ public sealed class OrdersController(IOrderService orderService) : ControllerBas
     }
 
     /// <summary>Gets one order with current order, payment, fulfillment, and delivery statuses.</summary>
+    /// <remarks>Pass the order id in the route to retrieve its line items, total, and latest tracking statuses. Poll this endpoint when a client needs refreshed order progress.</remarks>
     /// <response code="200">Returns the requested order.</response>
     /// <response code="404">The requested order does not exist.</response>
     [HttpGet("{id:int}")]
@@ -35,6 +37,7 @@ public sealed class OrdersController(IOrderService orderService) : ControllerBas
     }
 
     /// <summary>Places an order from the visitor cart and notifies both the admin and visitor by email notification.</summary>
+    /// <remarks>Send the visitor email in the request body after the visitor has added items to their cart. The current cart becomes the new order, so the request fails when that cart is empty. The Location response header identifies the created order.</remarks>
     /// <response code="201">The order was placed and notifications were created.</response>
     /// <response code="400">The visitor cart is empty.</response>
     [HttpPost]
@@ -52,6 +55,7 @@ public sealed class OrdersController(IOrderService orderService) : ControllerBas
     }
 
     /// <summary>Updates order tracking statuses and notifies the visitor and admin.</summary>
+    /// <remarks>Pass the order id in the route and send all four status values in the request body. Use this administrative operation whenever payment, fulfillment, or delivery progress changes; it also creates notifications for the visitor and admin.</remarks>
     /// <response code="200">Returns the updated order.</response>
     /// <response code="400">One or more status values are invalid.</response>
     /// <response code="404">The requested order does not exist.</response>
