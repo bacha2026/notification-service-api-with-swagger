@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>ADR and Polly Requirement Explanation</title>
+  <style>
+    @page { size: A4; margin: 18mm; }
+    body { font-family: Arial, sans-serif; color: #1f2937; line-height: 1.5; font-size: 10.5pt; }
+    h1 { color: #17365d; font-size: 22pt; margin: 0 0 5px; }
+    h2 { color: #1f4e79; font-size: 15pt; border-bottom: 1px solid #cad5e2; padding-bottom: 4px; margin-top: 24px; }
+    h3 { color: #365f91; font-size: 12pt; margin-top: 18px; }
+    p, li { margin-top: 5px; margin-bottom: 5px; }
+    .subtitle { color: #64748b; margin-bottom: 22px; }
+    .result { background: #eaf5ee; border-left: 4px solid #2e7d32; padding: 10px 14px; }
+    code { font-family: Consolas, monospace; background: #f1f5f9; padding: 1px 4px; }
+    pre { font-family: Consolas, monospace; font-size: 9pt; background: #f6f8fa; border: 1px solid #d8dee4; border-radius: 4px; padding: 10px; white-space: pre-wrap; }
+    table { border-collapse: collapse; width: 100%; margin: 10px 0; }
+    th, td { border: 1px solid #cbd5e1; padding: 7px; text-align: left; }
+    th { background: #eaf0f7; }
+    .path { font-family: Consolas, monospace; font-size: 9pt; color: #334155; }
+    .note { background: #fff8e1; border-left: 4px solid #f9a825; padding: 9px 12px; }
+    .flow { text-align: center; font-family: Consolas, monospace; font-weight: bold; line-height: 1.8; }
+  </style>
+</head>
+<body>
+  <h1>ADR and Polly Requirement Explanation</h1>
+  <p class="subtitle">Requirement: “Write 3 ADRs for decisions made so far; add Polly Circuit Breaker + Retry on an outbound call.”</p>
+
+  <p class="result"><strong>Result:</strong> Both parts of the requirement are fulfilled. The repository contains three accepted Architecture Decision Records, and the Postbound email HTTP call is protected by Polly retry, circuit-breaker, and timeout policies.</p>
+
+  <h2>1. The three ADRs</h2>
+
+  <h3>ADR 001: Use URL-segment API versioning</h3>
+  <p class="path">docs/adr/001-url-api-versioning.md</p>
+  <p>Explains why public endpoints use routes such as <code>/api/v1/...</code> and <code>/api/v2/...</code>. It covers concurrent version support, v1 deprecation and sunset headers, separate Swagger documents, alternatives considered, and the consequences of placing the version in the URL.</p>
+
+  <h3>ADR 002: Return Problem Details for API failures</h3>
+  <p class="path">docs/adr/002-problem-details-errors.md</p>
+  <p>Documents the decision to standardize failures with <code>application/problem+json</code>. It describes global exception handling, validation errors, safe exception mapping, trace identifiers, and consistent client-facing error contracts.</p>
+
+  <h3>ADR 003: Process bulk notifications asynchronously and protect outbound calls</h3>
+  <p class="path">docs/adr/003-background-bulk-notifications-and-resilience.md</p>
+  <p>Documents the decision to queue bulk notifications for background processing and to protect the external email provider with timeout, retry, and circuit-breaker policies. It also records limitations such as in-memory durability and the duplicate-delivery risk of retrying HTTP POST requests.</p>
+
+  <p>Each ADR contains the normal decision-record elements: context, decision drivers, alternatives, selected decision, tradeoffs, validation criteria, and conditions under which the decision should be revisited.</p>
+
+  <h2>2. The protected outbound call</h2>
+  <p>The external request is made by <span class="path">Infrastructure/Email/PostboundEmailSender.cs</span>. The class is a typed HTTP client implementing <code>IEmailSender</code>.</p>
+  <pre>using var request = new HttpRequestMessage(HttpMethod.Post, "emails")
+{
+    Content = JsonContent.Create(new { to = recipientEmail, subject, body })
+};
+
+request.Headers.Authorization =
+    new AuthenticationHeaderValue("Bearer", settings.ApiKey);
+
+using var response = await httpClient.SendAsync(request, cancellationToken);
+response.EnsureSuccessStatusCode();</pre>
+  <p>Because this <code>HttpClient</code> is created by the typed-client registration in <code>Program.cs</code>, its <code>SendAsync</code> call automatically passes through the registered Polly handlers.</p>
+
+  <h2>3. Retry policy</h2>
+  <p>The retry policy is defined in <span class="path">Infrastructure/Email/EmailResiliencePolicies.cs</span>.</p>
+  <pre>HttpPolicyExtensions
+    .HandleTransientHttpError()
+    .Or&lt;TimeoutRejectedException&gt;()
+    .WaitAndRetryAsync(
+        retryCount: options.RetryCount,
+        sleepDurationProvider: retryAttempt =&gt;
+            TimeSpan.FromMilliseconds(
+                options.InitialRetryDelayMilliseconds
+                * Math.Pow(2, retryAttempt)),
+        onRetry: ...);</pre>
+  <p><code>HandleTransientHttpError()</code> handles network failures, HTTP 408, and HTTP 5xx responses. <code>TimeoutRejectedException</code> adds failures produced by the Polly timeout policy.</p>
+
+  <p>With the current configuration, Polly performs three retries with exponential backoff:</p>
+  <table>
+    <thead><tr><th>Retry</th><th>Calculation</th><th>Delay</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td>200 × 2¹</td><td>400 ms</td></tr>
+      <tr><td>2</td><td>200 × 2²</td><td>800 ms</td></tr>
+      <tr><td>3</td><td>200 × 2³</td><td>1,600 ms</td></tr>
+    </tbody>
+  </table>
+  <p>One logical send can therefore make four physical provider attempts: the original attempt plus three retries.</p>
+
+  <h2>4. Circuit-breaker policy</h2>
+  <p>The circuit breaker is also defined in <span class="path">Infrastructure/Email/EmailResiliencePolicies.cs</span>.</p>
+  <pre>HttpPolicyExtensions
+    .HandleTransientHttpError()
+    .Or&lt;TimeoutRejectedException&gt;()
+    .CircuitBreakerAsync(
+        handledEventsAllowedBeforeBreaking:
+            options.CircuitBreakerFailures,
+        durationOfBreak:
+            TimeSpan.FromSeconds(options.CircuitBreakDurationSeconds),
+        onBreak: ...,
+        onReset: ...,
+        onHalfOpen: ...);</pre>
+  <p>With the configured threshold of three failures and a 30-second break:</p>
+  <ol>
+    <li>The closed circuit initially permits calls.</li>
+    <li>After three failed logical sends, the circuit opens.</li>
+    <li>Calls received while it is open fail immediately without contacting the provider.</li>
+    <li>After 30 seconds, the circuit becomes half-open and allows a trial call.</li>
+    <li>A successful trial resets the circuit; a failed trial opens it again.</li>
+  </ol>
+
+  <h2>5. Why the policy provider is a singleton</h2>
+  <p><span class="path">EmailResiliencePolicyProvider</span> constructs and owns the policy instances. It is registered as a singleton in <code>Program.cs</code>:</p>
+  <pre>builder.Services.AddSingleton&lt;EmailResiliencePolicyProvider&gt;();</pre>
+  <p>A circuit breaker must retain its failure count and open/closed state between application requests. If a new breaker were created for every email, its count would continually reset and it might never open.</p>
+
+  <h2>6. Policy registration and execution order</h2>
+  <p>The typed client and policies are registered in <span class="path">Program.cs</span>:</p>
+  <pre>builder.Services
+    .AddHttpClient&lt;PostboundEmailSender&gt;(...)
+    .AddPolicyHandler((services, _) =&gt;
+        services.GetRequiredService&lt;EmailResiliencePolicyProvider&gt;().CircuitBreaker)
+    .AddPolicyHandler((services, _) =&gt;
+        services.GetRequiredService&lt;EmailResiliencePolicyProvider&gt;().Retry)
+    .AddPolicyHandler((services, _) =&gt;
+        services.GetRequiredService&lt;EmailResiliencePolicyProvider&gt;().Timeout);</pre>
+  <div class="flow">Circuit Breaker<br>↓<br>Retry<br>↓<br>Per-attempt Timeout<br>↓<br>Postbound HTTP call</div>
+  <p>Every attempt receives its own timeout. The retry policy can repeat a timed-out or transiently failed attempt. The outer circuit breaker sees the final outcome of the complete retry sequence, so it counts failed logical sends rather than individual HTTP attempts.</p>
+
+  <h2>7. Application call path</h2>
+  <p>The application depends on <code>IEmailSender</code>, keeping provider-specific HTTP logic outside the service layer. <span class="path">Service/Notification/NotificationDispatcher.cs</span> saves the notification intent and calls the abstraction:</p>
+  <pre>await notificationRepository.SaveChangesAsync(cancellationToken);
+
+var deliveryOutcome = await emailSender.SendAsync(
+    recipientEmail,
+    subject,
+    body,
+    cancellationToken);</pre>
+  <div class="flow">NotificationDispatcher → IEmailSender → PostboundEmailSender<br>→ Circuit Breaker → Retry → Timeout → HttpClient.SendAsync</div>
+
+  <h2>8. Configuration and current runtime behavior</h2>
+  <p>The values are configured under <code>Postbound</code> in <span class="path">appsettings.json</span>:</p>
+  <pre>"Postbound": {
+  "BaseUrl": "https://api.postbound.com/",
+  "ApiKey": "",
+  "Enabled": false,
+  "RequestTimeoutSeconds": 10,
+  "RetryCount": 3,
+  "InitialRetryDelayMilliseconds": 200,
+  "CircuitBreakerFailures": 3,
+  "CircuitBreakDurationSeconds": 30
+}</pre>
+  <p>The matching validated settings class is <span class="path">Infrastructure/Email/PostboundOptions.cs</span>.</p>
+  <p class="note"><strong>Important:</strong> The resilience implementation is fully wired, but the provider is disabled by default. With <code>Enabled: false</code>, the sender returns <code>NotAttempted</code> and makes no network request. A verified provider contract, API key, and <code>Enabled: true</code> are required for a real outbound call.</p>
+</body>
+</html>

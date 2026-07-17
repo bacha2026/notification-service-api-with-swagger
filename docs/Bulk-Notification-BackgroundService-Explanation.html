@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Bulk Notification BackgroundService Requirement</title>
+  <style>
+    @page { size: A4; margin: 18mm; }
+    body { font-family: "Segoe UI", Arial, sans-serif; color: #1f2937; line-height: 1.55; font-size: 10.5pt; }
+    h1 { color: #123b5d; font-size: 23pt; margin: 0 0 5mm; }
+    h2 { color: #155e75; font-size: 15pt; margin: 8mm 0 3mm; border-bottom: 1px solid #cbd5e1; padding-bottom: 2mm; }
+    h3 { color: #334155; font-size: 12pt; margin: 5mm 0 2mm; }
+    p, li { margin-top: 1.5mm; margin-bottom: 1.5mm; }
+    code { font-family: Consolas, monospace; background: #eef2f7; padding: 0.2mm 1mm; border-radius: 2px; }
+    pre { background: #0f172a; color: #e2e8f0; padding: 4mm; border-radius: 5px; white-space: pre-wrap; font-size: 8.5pt; line-height: 1.45; }
+    .summary { background: #ecfeff; border-left: 4px solid #0891b2; padding: 3mm 4mm; }
+    .path { color: #475569; font-family: Consolas, monospace; font-size: 9pt; overflow-wrap: anywhere; }
+    .flow { text-align: center; background: #f8fafc; border: 1px solid #cbd5e1; padding: 4mm; font-family: Consolas, monospace; }
+    .note { background: #fff7ed; border-left: 4px solid #f97316; padding: 3mm 4mm; }
+    table { width: 100%; border-collapse: collapse; margin: 3mm 0; }
+    th, td { border: 1px solid #cbd5e1; padding: 2.5mm; text-align: left; vertical-align: top; }
+    th { background: #e2e8f0; }
+    .page-break { break-before: page; }
+  </style>
+</head>
+<body>
+  <h1>Bulk Notification BackgroundService</h1>
+  <p><strong>Requirement:</strong> Add a <code>BackgroundService</code>; <code>POST /notifications/bulk</code> returns <code>202 Accepted</code> plus a <code>jobId</code>; a status endpoint reflects progress.</p>
+
+  <div class="summary"><strong>Result:</strong> The requirement is fulfilled. The implementation is split across the controller, in-memory job service, background worker, response DTO, and dependency-injection registration.</div>
+
+  <h2>1. POST /notifications/bulk returns 202 and jobId</h2>
+  <p class="path">Presentation/Controllers/Notification/NotificationsController.cs — lines 85–103</p>
+  <pre>[HttpPost("bulk")]
+public ActionResult&lt;BulkNotificationJobDto&gt; CreateBulkNotifications(...)
+{
+    var job = bulkJobs.Queue(request);
+    ...
+    return Accepted(statusLocation, job);
+}</pre>
+  <p><code>bulkJobs.Queue(request)</code> creates and queues the job. <code>Accepted(statusLocation, job)</code> produces HTTP 202, puts the polling URL in the <code>Location</code> header, and sends the job DTO in the response body.</p>
+  <p>The actual routes supported by the versioned controller are:</p>
+  <ul>
+    <li><code>POST /api/v2/notifications/bulk</code></li>
+    <li><code>POST /api/v1/notifications/bulk</code></li>
+    <li><code>POST /api/notifications/bulk</code></li>
+  </ul>
+
+  <h3>Response contract</h3>
+  <p class="path">Application/Contracts/Notification/BulkNotificationDtos.cs — lines 60–85</p>
+  <pre>{
+  "jobId": "...",
+  "status": "Queued",
+  "totalCount": 10,
+  "processedCount": 0,
+  "succeededCount": 0,
+  "failedCount": 0,
+  "queuedAtUtc": "...",
+  "startedAtUtc": null,
+  "completedAtUtc": null,
+  "error": null
+}</pre>
+
+  <h2>2. The job is queued for background processing</h2>
+  <p class="path">Service/Notification/BulkNotificationJobService.cs — lines 40–89</p>
+  <p>The <code>Queue()</code> method:</p>
+  <ol>
+    <li>Rejects an empty batch.</li>
+    <li>Enforces the configured maximum batch size.</li>
+    <li>Creates a unique ID using <code>Guid.NewGuid()</code>.</li>
+    <li>Stores the job in a <code>ConcurrentDictionary</code>.</li>
+    <li>Writes the job into a bounded in-memory <code>Channel</code>.</li>
+    <li>Returns the initial job snapshot with status <code>Queued</code>.</li>
+  </ol>
+  <div class="flow">HTTP request → queue job → return 202 immediately<br>↓<br>Background worker reads and processes the job</div>
+  <p>The bounded queue prevents unlimited memory growth. If the queue or tracked-job capacity is exhausted, the service throws an exception that is exposed as <code>503 Service Unavailable</code>.</p>
+
+  <h2 class="page-break">3. A BackgroundService processes the job</h2>
+  <p class="path">Infrastructure/BackgroundServices/BulkNotificationWorker.cs — lines 9–58</p>
+  <pre>public sealed class BulkNotificationWorker(...) : BackgroundService
+{
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        await foreach (var job in jobs.ReadAllAsync(stoppingToken))
+        {
+            ...
+        }
+    }
+}</pre>
+  <p>The worker continuously reads jobs from the channel. For each job it:</p>
+  <ol>
+    <li>Calls <code>job.Start()</code>, changing the status from <code>Queued</code> to <code>Processing</code>.</li>
+    <li>Loops through every notification.</li>
+    <li>Creates a dependency-injection scope for each item because database-backed services are scoped.</li>
+    <li>Uses <code>INotificationDispatcher</code> for email items.</li>
+    <li>Uses <code>INotificationService</code> for other channels.</li>
+    <li>Calls <code>RecordSuccess()</code> or <code>RecordFailure()</code>.</li>
+    <li>Calls <code>Complete()</code> after all items have been attempted.</li>
+  </ol>
+  <p>An individual item failure is caught inside the loop. This means one bad notification does not prevent the rest of the batch from being processed.</p>
+
+  <h3>Worker registration</h3>
+  <p class="path">Program.cs — lines 109–116</p>
+  <pre>builder.Services.AddSingleton&lt;BulkNotificationJobService&gt;();
+builder.Services.AddSingleton&lt;IBulkNotificationJobService&gt;(...);
+builder.Services.AddHostedService&lt;BulkNotificationWorker&gt;();</pre>
+  <p>The job service is a singleton so the HTTP controller and background worker share the same queue and job dictionary. <code>AddHostedService</code> starts the worker with the application.</p>
+
+  <h2>4. The status endpoint reflects progress</h2>
+  <p class="path">Presentation/Controllers/Notification/NotificationsController.cs — lines 105–116</p>
+  <pre>GET /api/v2/notifications/bulk/{jobId}
+
+var job = bulkJobs.GetStatus(jobId);
+return job is null ? NotFound() : Ok(job);</pre>
+  <p><code>GetStatus()</code> reads the job from the shared dictionary and returns a snapshot containing its current status and counters.</p>
+
+  <table>
+    <thead><tr><th>Method</th><th>Effect visible through status endpoint</th></tr></thead>
+    <tbody>
+      <tr><td><code>Start()</code></td><td>Status becomes <code>Processing</code>; start time is recorded.</td></tr>
+      <tr><td><code>RecordSuccess()</code></td><td>Increments processed and succeeded counts.</td></tr>
+      <tr><td><code>RecordFailure()</code></td><td>Increments processed and failed counts; records a safe summary error.</td></tr>
+      <tr><td><code>Complete()</code></td><td>Status becomes <code>Completed</code> or <code>CompletedWithErrors</code>; completion time is recorded.</td></tr>
+      <tr><td><code>Cancel()</code></td><td>Status becomes <code>Cancelled</code>.</td></tr>
+    </tbody>
+  </table>
+  <p>All state reads and writes use <code>lock (sync)</code>. Therefore, polling while the worker updates the job returns a consistent snapshot.</p>
+  <div class="flow">Queued → Processing (0/10) → Processing (4/10) → Completed (10/10)</div>
+
+  <h2>Important limitation</h2>
+  <div class="note">The queue and status dictionary exist only in application memory. Restarting the application loses queued jobs and their status. Completed jobs are also removed after the configured retention period. This is asynchronous processing, but it is not a durable job system.</div>
+
+  <h2>Requirement-to-code map</h2>
+  <table>
+    <thead><tr><th>Requirement</th><th>Implementation</th></tr></thead>
+    <tbody>
+      <tr><td>Add a <code>BackgroundService</code></td><td><code>Infrastructure/BackgroundServices/BulkNotificationWorker.cs</code></td></tr>
+      <tr><td>POST bulk returns 202 + jobId</td><td><code>NotificationsController.CreateBulkNotifications()</code> and <code>BulkNotificationJobDto</code></td></tr>
+      <tr><td>Queue work outside HTTP request</td><td><code>BulkNotificationJobService</code> and its bounded <code>Channel</code></td></tr>
+      <tr><td>Status endpoint reflects progress</td><td><code>NotificationsController.GetBulkNotificationStatus()</code> plus synchronized job counters</td></tr>
+      <tr><td>Worker starts with application</td><td><code>Program.cs: AddHostedService&lt;BulkNotificationWorker&gt;()</code></td></tr>
+    </tbody>
+  </table>
+</body>
+</html>
