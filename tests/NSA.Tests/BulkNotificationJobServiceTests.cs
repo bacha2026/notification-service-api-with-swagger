@@ -1,7 +1,13 @@
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using NSA.Application.Exceptions;
+using NSA.Application.Abstractions;
 using NSA.Application.Contracts;
+using NSA.Application.Exceptions;
+using NSA.Domain.Entities;
 using NSA.Domain.Enums;
+using NSA.Persistence;
 using NSA.Service;
 
 namespace NSA.Tests;
@@ -9,71 +15,91 @@ namespace NSA.Tests;
 public sealed class BulkNotificationJobServiceTests
 {
     [Fact]
-    public void Queue_rejects_a_request_without_notifications()
+    public async Task Queue_rejects_a_request_without_notifications()
     {
-        var service = new BulkNotificationJobService();
-        var request = new CreateBulkNotificationsRequest(Array.Empty<BulkNotificationItemRequest>());
+        await using var harness = CreateHarness();
 
-        var exception = Assert.Throws<RequestValidationException>(() => service.Queue(request));
+        var exception = await Assert.ThrowsAsync<RequestValidationException>(() =>
+            harness.Service.QueueAsync(
+                new CreateBulkNotificationsRequest(Array.Empty<BulkNotificationItemRequest>()),
+                "correlation",
+                CancellationToken.None));
 
         Assert.Equal("At least one notification is required.", exception.Message);
+        Assert.Empty(harness.Publisher.Messages);
     }
 
     [Fact]
-    public void Queue_rejects_a_null_notification_collection()
+    public async Task Queue_rejects_a_null_notification_collection()
     {
-        var service = new BulkNotificationJobService();
-        var request = new CreateBulkNotificationsRequest(null!);
+        await using var harness = CreateHarness();
 
-        Assert.Throws<RequestValidationException>(() => service.Queue(request));
+        await Assert.ThrowsAsync<RequestValidationException>(() =>
+            harness.Service.QueueAsync(
+                new CreateBulkNotificationsRequest(null!),
+                "correlation",
+                CancellationToken.None));
     }
 
     [Fact]
-    public void Queue_returns_a_stable_queued_snapshot_and_copies_the_input()
+    public async Task Queue_persists_job_and_items_then_publishes_a_small_versioned_reference()
     {
-        var notifications = new List<BulkNotificationItemRequest>
+        await using var harness = CreateHarness();
+        var request = new CreateBulkNotificationsRequest(new[]
         {
-            CreateItem("first@example.com", "First")
-        };
-        var service = new BulkNotificationJobService();
+            CreateItem(" first@example.com ", " First "),
+            CreateItem("second@example.com", "Second")
+        });
 
-        var queued = service.Queue(new CreateBulkNotificationsRequest(notifications));
-        notifications.Add(CreateItem("second@example.com", "Second"));
-        var status = service.GetStatus(queued.JobId);
+        var queued = await harness.Service.QueueAsync(request, "trace-123", CancellationToken.None);
 
-        Assert.NotEqual(Guid.Empty, queued.JobId);
-        Assert.Equal("Queued", queued.Status);
-        Assert.Equal(1, queued.TotalCount);
-        Assert.Equal(0, queued.ProcessedCount);
-        Assert.Equal(queued, status);
+        Assert.Equal(BulkNotificationJobStatuses.Queued, queued.Status);
+        Assert.Equal("trace-123", queued.CorrelationId);
+        Assert.Equal(2, queued.TotalCount);
+        var persisted = await harness.Context.BulkNotificationJobs
+            .AsNoTracking()
+            .Include(job => job.Items)
+            .SingleAsync(job => job.Id == queued.JobId);
+        Assert.Equal(BulkNotificationRequestedV1.CurrentSchemaVersion, persisted.MessageSchemaVersion);
+        Assert.Equal(new[] { 0, 1 }, persisted.Items.OrderBy(item => item.Sequence).Select(item => item.Sequence));
+        Assert.Equal("first@example.com", persisted.Items.Single(item => item.Sequence == 0).RecipientEmail);
+        Assert.Equal("First", persisted.Items.Single(item => item.Sequence == 0).Subject);
+
+        var command = Assert.Single(harness.Publisher.Messages);
+        Assert.Equal(BulkNotificationRequestedV1.CurrentSchemaVersion, command.SchemaVersion);
+        Assert.Equal(queued.JobId, command.JobId);
+        Assert.Equal("trace-123", command.CorrelationId);
+        Assert.NotEqual(Guid.Empty, command.MessageId);
     }
 
     [Fact]
-    public void GetStatus_returns_null_for_an_unknown_job()
+    public async Task Persisted_status_is_queryable_from_a_new_service_scope()
     {
-        var service = new BulkNotificationJobService();
+        await using var harness = CreateHarness();
+        var queued = await harness.Service.QueueAsync(
+            new CreateBulkNotificationsRequest(new[] { CreateItem("persisted@example.com", "Persisted") }),
+            "cross-process",
+            CancellationToken.None);
 
-        Assert.Null(service.GetStatus(Guid.NewGuid()));
+        await using var secondContext = new NotificationDbContext(harness.DatabaseOptions);
+        var secondService = CreateService(
+            secondContext,
+            harness.Publisher,
+            maxTrackedJobs: 10,
+            maxBatchSize: 100,
+            timeProvider: harness.TimeProvider);
+
+        var status = await secondService.GetStatusAsync(queued.JobId, CancellationToken.None);
+
+        Assert.NotNull(status);
+        Assert.Equal(BulkNotificationJobStatuses.Queued, status.Status);
+        Assert.Equal("cross-process", status.CorrelationId);
     }
 
     [Fact]
-    public async Task ReadAllAsync_yields_the_job_that_was_queued()
+    public async Task Queue_enforces_the_configured_maximum_batch_size()
     {
-        var service = new BulkNotificationJobService();
-        var queued = service.Queue(new CreateBulkNotificationsRequest(
-            new[] { CreateItem("reader@example.com", "Read me") }));
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-        await using var reader = service.ReadAllAsync(timeout.Token).GetAsyncEnumerator();
-
-        Assert.True(await reader.MoveNextAsync());
-        Assert.Equal(queued.JobId, reader.Current.Id);
-        Assert.Equal("reader@example.com", reader.Current.Notifications.Single().RecipientEmail);
-    }
-
-    [Fact]
-    public void Queue_enforces_the_configured_maximum_batch_size()
-    {
-        var service = CreateService(queueCapacity: 10, maxTrackedJobs: 10, maxBatchSize: 2);
+        await using var harness = CreateHarness(maxBatchSize: 2);
         var request = new CreateBulkNotificationsRequest(new[]
         {
             CreateItem("one@example.com", "One"),
@@ -81,233 +107,206 @@ public sealed class BulkNotificationJobServiceTests
             CreateItem("three@example.com", "Three")
         });
 
-        var exception = Assert.Throws<RequestValidationException>(() => service.Queue(request));
+        var exception = await Assert.ThrowsAsync<RequestValidationException>(() =>
+            harness.Service.QueueAsync(request, "correlation", CancellationToken.None));
 
         Assert.Contains("more than 2", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Queue_rejects_new_work_when_the_tracked_job_limit_is_reached()
+    public async Task Queue_rejects_new_work_when_the_active_job_limit_is_reached()
     {
-        var service = CreateService(queueCapacity: 2, maxTrackedJobs: 1);
-        var first = service.Queue(new CreateBulkNotificationsRequest(
-            new[] { CreateItem("first@example.com", "First") }));
+        await using var harness = CreateHarness(maxTrackedJobs: 1);
+        var first = await harness.Service.QueueAsync(
+            new CreateBulkNotificationsRequest(new[] { CreateItem("first@example.com", "First") }),
+            "first",
+            CancellationToken.None);
 
-        Assert.Throws<ServiceUnavailableException>(() => service.Queue(new CreateBulkNotificationsRequest(
-            new[] { CreateItem("second@example.com", "Second") })));
-        Assert.NotNull(service.GetStatus(first.JobId));
+        await Assert.ThrowsAsync<ServiceUnavailableException>(() =>
+            harness.Service.QueueAsync(
+                new CreateBulkNotificationsRequest(new[] { CreateItem("second@example.com", "Second") }),
+                "second",
+                CancellationToken.None));
+        Assert.NotNull(await harness.Service.GetStatusAsync(first.JobId, CancellationToken.None));
     }
 
     [Fact]
-    public async Task Parallel_queue_admission_never_exceeds_the_tracked_job_limit()
+    public async Task Publish_failure_is_persisted_and_reported_as_service_unavailable()
     {
-        const int maxTrackedJobs = 8;
-        const int attemptCount = 128;
-        var service = CreateService(queueCapacity: attemptCount, maxTrackedJobs: maxTrackedJobs);
-        var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var publisher = new RecordingPublisher(new InvalidOperationException("broker unavailable"));
+        await using var harness = CreateHarness(publisher: publisher);
 
-        var attempts = Enumerable.Range(0, attemptCount)
-            .Select(async index =>
-            {
-                await start.Task;
-                try
-                {
-                    return service.Queue(new CreateBulkNotificationsRequest(
-                        new[] { CreateItem($"parallel-{index}@example.com", $"Parallel {index}") }));
-                }
-                catch (ServiceUnavailableException)
-                {
-                    return null;
-                }
-            })
-            .ToArray();
+        await Assert.ThrowsAsync<ServiceUnavailableException>(() =>
+            harness.Service.QueueAsync(
+                new CreateBulkNotificationsRequest(new[] { CreateItem("failure@example.com", "Failure") }),
+                "publish-failure",
+                CancellationToken.None));
 
-        start.SetResult();
-        var results = await Task.WhenAll(attempts);
-        var accepted = results.Where(result => result is not null).Cast<BulkNotificationJobDto>().ToArray();
-
-        Assert.Equal(maxTrackedJobs, accepted.Length);
-        Assert.Equal(attemptCount - maxTrackedJobs, results.Count(result => result is null));
-        Assert.All(accepted, job => Assert.NotNull(service.GetStatus(job.JobId)));
+        var failed = await harness.Context.BulkNotificationJobs.AsNoTracking().SingleAsync();
+        Assert.Equal(BulkNotificationJobStatuses.PublishFailed, failed.Status);
+        Assert.NotNull(failed.CompletedAtUtc);
+        Assert.Equal("publish-failure", failed.CorrelationId);
+        Assert.DoesNotContain("broker unavailable", failed.Error, StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task Full_queue_rejects_work_without_leaving_an_orphaned_tracked_job()
+    public async Task Ambiguous_publish_failure_does_not_overwrite_concurrent_worker_completion()
     {
-        var service = CreateService(queueCapacity: 1, maxTrackedJobs: 2);
-        service.Queue(new CreateBulkNotificationsRequest(
-            new[] { CreateItem("first@example.com", "First") }));
-
-        Assert.Throws<ServiceUnavailableException>(() => service.Queue(new CreateBulkNotificationsRequest(
-            new[] { CreateItem("rejected@example.com", "Rejected") })));
-
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-        await using (var reader = service.ReadAllAsync(timeout.Token).GetAsyncEnumerator())
+        var databaseRoot = new InMemoryDatabaseRoot();
+        var databaseOptions = new DbContextOptionsBuilder<NotificationDbContext>()
+            .UseInMemoryDatabase($"ambiguous-publish-{Guid.NewGuid():N}", databaseRoot)
+            .Options;
+        await using var apiContext = new NotificationDbContext(databaseOptions);
+        var publisher = new CallbackPublisher(async (message, cancellationToken) =>
         {
-            Assert.True(await reader.MoveNextAsync());
-        }
+            await using var workerContext = new NotificationDbContext(databaseOptions);
+            var concurrentlyProcessed = await workerContext.BulkNotificationJobs
+                .SingleAsync(job => job.Id == message.JobId, cancellationToken);
+            concurrentlyProcessed.Status = BulkNotificationJobStatuses.Completed;
+            concurrentlyProcessed.ProcessedCount = concurrentlyProcessed.TotalCount;
+            concurrentlyProcessed.SucceededCount = concurrentlyProcessed.TotalCount;
+            concurrentlyProcessed.StartedAtUtc = DateTimeOffset.UtcNow;
+            concurrentlyProcessed.CompletedAtUtc = DateTimeOffset.UtcNow;
+            await workerContext.SaveChangesAsync(cancellationToken);
+            throw new InvalidOperationException("confirm connection lost after broker acceptance");
+        });
+        var service = CreateService(
+            apiContext,
+            publisher,
+            maxTrackedJobs: 10,
+            maxBatchSize: 100);
 
-        var acceptedAfterCapacityWasReleased = service.Queue(new CreateBulkNotificationsRequest(
-            new[] { CreateItem("third@example.com", "Third") }));
-        Assert.NotNull(service.GetStatus(acceptedAfterCapacityWasReleased.JobId));
+        await Assert.ThrowsAsync<ServiceUnavailableException>(() =>
+            service.QueueAsync(
+                new CreateBulkNotificationsRequest(new[] { CreateItem("ambiguous@example.com", "Ambiguous") }),
+                "ambiguous-confirm",
+                CancellationToken.None));
+
+        apiContext.ChangeTracker.Clear();
+        var persisted = await apiContext.BulkNotificationJobs.AsNoTracking().SingleAsync();
+        Assert.Equal(BulkNotificationJobStatuses.Completed, persisted.Status);
+        Assert.Equal(1, persisted.ProcessedCount);
+        Assert.Equal(1, persisted.SucceededCount);
     }
 
     [Fact]
-    public void Job_records_successful_and_failed_items_before_completing_with_errors()
+    public async Task Completed_jobs_are_removed_after_the_retention_period()
     {
-        var queuedAt = new DateTimeOffset(2026, 7, 13, 8, 0, 0, TimeSpan.Zero);
-        var job = new BulkNotificationJob(
-            Guid.NewGuid(),
-            new[]
-            {
-                CreateItem("success@example.com", "Success"),
-                CreateItem("failure@example.com", "Failure"),
-                CreateItem("later-failure@example.com", "Later failure")
-            },
-            queuedAt);
-
-        job.Start();
-        var processing = job.ToDto();
-        job.RecordSuccess();
-        job.RecordFailure(new InvalidOperationException("provider unavailable"));
-        job.RecordFailure(new InvalidOperationException("later error"));
-        job.Complete();
-        var completed = job.ToDto();
-
-        Assert.Equal("Processing", processing.Status);
-        Assert.NotNull(processing.StartedAtUtc);
-        Assert.Equal("CompletedWithErrors", completed.Status);
-        Assert.Equal(3, completed.ProcessedCount);
-        Assert.Equal(1, completed.SucceededCount);
-        Assert.Equal(2, completed.FailedCount);
-        Assert.Equal("One or more notifications could not be processed.", completed.Error);
-        Assert.NotNull(completed.CompletedAtUtc);
-        Assert.Equal(queuedAt, completed.QueuedAtUtc);
-        Assert.Equal(3, completed.TotalCount);
-        Assert.Empty(job.Notifications);
-    }
-
-    [Fact]
-    public async Task Terminal_job_releases_payload_but_retains_its_status_snapshot()
-    {
-        var service = CreateService(queueCapacity: 2, maxTrackedJobs: 1);
-        var queued = service.Queue(new CreateBulkNotificationsRequest(new[]
+        var now = new DateTimeOffset(2026, 7, 20, 4, 0, 0, TimeSpan.Zero);
+        var timeProvider = new ManualTimeProvider(now);
+        await using var harness = CreateHarness(
+            maxTrackedJobs: 1,
+            completedRetentionMinutes: 1,
+            timeProvider: timeProvider);
+        harness.Context.BulkNotificationJobs.Add(new BulkNotificationJob
         {
-            CreateItem("first@example.com", "First"),
-            CreateItem("second@example.com", "Second")
-        }));
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-        await using var reader = service.ReadAllAsync(timeout.Token).GetAsyncEnumerator();
-        Assert.True(await reader.MoveNextAsync());
-        var job = reader.Current;
+            Id = Guid.NewGuid(),
+            Status = BulkNotificationJobStatuses.Completed,
+            MessageSchemaVersion = 1,
+            CorrelationId = "expired",
+            TotalCount = 1,
+            ProcessedCount = 1,
+            SucceededCount = 1,
+            QueuedAtUtc = now.AddMinutes(-10),
+            CompletedAtUtc = now.AddMinutes(-2)
+        });
+        await harness.Context.SaveChangesAsync();
 
-        Assert.Equal(2, job.Notifications.Count);
-        job.Start();
-        job.RecordSuccess();
-        job.RecordFailure(new InvalidOperationException("provider unavailable"));
-        job.Complete();
+        var replacement = await harness.Service.QueueAsync(
+            new CreateBulkNotificationsRequest(new[] { CreateItem("replacement@example.com", "Replacement") }),
+            "replacement",
+            CancellationToken.None);
 
-        Assert.Empty(job.Notifications);
-        var retained = Assert.IsType<BulkNotificationJobDto>(service.GetStatus(queued.JobId));
-        Assert.Equal("CompletedWithErrors", retained.Status);
-        Assert.Equal(2, retained.TotalCount);
-        Assert.Equal(2, retained.ProcessedCount);
-        Assert.Equal(1, retained.SucceededCount);
-        Assert.Equal(1, retained.FailedCount);
-        Assert.Throws<ServiceUnavailableException>(() => service.Queue(new CreateBulkNotificationsRequest(
-            new[] { CreateItem("replacement@example.com", "Replacement") })));
+        Assert.Single(await harness.Context.BulkNotificationJobs.AsNoTracking().ToListAsync());
+        Assert.NotNull(await harness.Service.GetStatusAsync(replacement.JobId, CancellationToken.None));
     }
 
     [Fact]
-    public void Cancelled_job_releases_payload_and_retains_the_original_total()
+    public async Task GetStatus_returns_null_for_an_unknown_job()
     {
-        var job = new BulkNotificationJob(
-            Guid.NewGuid(),
-            new[]
-            {
-                CreateItem("first@example.com", "First"),
-                CreateItem("second@example.com", "Second")
-            },
-            DateTimeOffset.UtcNow);
+        await using var harness = CreateHarness();
 
-        job.Start();
-        job.RecordSuccess();
-        job.Cancel();
-        var cancelled = job.ToDto();
-
-        Assert.Empty(job.Notifications);
-        Assert.Equal("Cancelled", cancelled.Status);
-        Assert.Equal(2, cancelled.TotalCount);
-        Assert.Equal(1, cancelled.ProcessedCount);
-        Assert.Equal(1, cancelled.SucceededCount);
-    }
-
-    [Fact]
-    public void Only_terminal_jobs_older_than_the_retention_cutoff_are_expired()
-    {
-        var job = new BulkNotificationJob(
-            Guid.NewGuid(),
-            new[] { CreateItem("retention@example.com", "Retention") },
-            DateTimeOffset.UtcNow);
-
-        Assert.False(job.CompletedBefore(DateTimeOffset.MaxValue));
-
-        job.Start();
-        job.RecordSuccess();
-        job.Complete();
-        var completedAt = Assert.IsType<DateTimeOffset>(job.ToDto().CompletedAtUtc);
-
-        Assert.False(job.CompletedBefore(completedAt));
-        Assert.True(job.CompletedBefore(completedAt.AddTicks(1)));
-    }
-
-    [Fact]
-    public async Task Completed_jobs_are_removed_after_the_configured_retention_period()
-    {
-        var timeProvider = new ManualTimeProvider(new DateTimeOffset(2026, 7, 13, 8, 0, 0, TimeSpan.Zero));
-        var service = CreateService(queueCapacity: 1, maxTrackedJobs: 1, timeProvider: timeProvider);
-        var queued = service.Queue(new CreateBulkNotificationsRequest(
-            new[] { CreateItem("retention@example.com", "Retention") }));
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-        await using var reader = service.ReadAllAsync(timeout.Token).GetAsyncEnumerator();
-        Assert.True(await reader.MoveNextAsync());
-
-        reader.Current.Start();
-        reader.Current.RecordSuccess();
-        reader.Current.Complete();
-        timeProvider.Advance(TimeSpan.FromMinutes(2));
-
-        Assert.Null(service.GetStatus(queued.JobId));
-        var replacement = service.Queue(new CreateBulkNotificationsRequest(
-            new[] { CreateItem("replacement@example.com", "Replacement") }));
-        Assert.NotNull(service.GetStatus(replacement.JobId));
+        Assert.Null(await harness.Service.GetStatusAsync(Guid.NewGuid(), CancellationToken.None));
     }
 
     private static BulkNotificationItemRequest CreateItem(string recipientEmail, string subject) =>
         new(recipientEmail, NotificationChannel.Email, subject, "Body", null);
 
-    private static BulkNotificationJobService CreateService(
-        int queueCapacity,
-        int maxTrackedJobs,
+    private static TestHarness CreateHarness(
+        int maxTrackedJobs = 10,
         int maxBatchSize = 100,
-        TimeProvider? timeProvider = null) =>
-        new(Options.Create(new BulkNotificationOptions
-        {
-            QueueCapacity = queueCapacity,
-            MaxTrackedJobs = maxTrackedJobs,
-            MaxBatchSize = maxBatchSize,
-            CompletedJobRetentionMinutes = 1
-        }), timeProvider ?? TimeProvider.System);
-
-    private sealed class ManualTimeProvider(DateTimeOffset utcNow) : TimeProvider
+        int completedRetentionMinutes = 60,
+        RecordingPublisher? publisher = null,
+        TimeProvider? timeProvider = null)
     {
-        private DateTimeOffset currentUtcNow = utcNow;
+        var databaseRoot = new InMemoryDatabaseRoot();
+        var databaseOptions = new DbContextOptionsBuilder<NotificationDbContext>()
+            .UseInMemoryDatabase($"bulk-jobs-{Guid.NewGuid():N}", databaseRoot)
+            .Options;
+        var context = new NotificationDbContext(databaseOptions);
+        var actualPublisher = publisher ?? new RecordingPublisher();
+        var actualTimeProvider = timeProvider ?? TimeProvider.System;
+        var service = CreateService(
+            context,
+            actualPublisher,
+            maxTrackedJobs,
+            maxBatchSize,
+            completedRetentionMinutes,
+            actualTimeProvider);
+        return new TestHarness(context, databaseOptions, service, actualPublisher, actualTimeProvider);
+    }
 
-        public override DateTimeOffset GetUtcNow() => currentUtcNow;
+    private static BulkNotificationJobService CreateService(
+        NotificationDbContext context,
+        IBulkNotificationCommandPublisher publisher,
+        int maxTrackedJobs,
+        int maxBatchSize,
+        int completedRetentionMinutes = 60,
+        TimeProvider? timeProvider = null) =>
+        new(
+            context,
+            publisher,
+            Options.Create(new BulkNotificationOptions
+            {
+                MaxTrackedJobs = maxTrackedJobs,
+                MaxBatchSize = maxBatchSize,
+                CompletedJobRetentionMinutes = completedRetentionMinutes
+            }),
+            timeProvider ?? TimeProvider.System,
+            NullLogger<BulkNotificationJobService>.Instance);
 
-        public void Advance(TimeSpan duration)
+    private sealed class RecordingPublisher(Exception? exception = null) : IBulkNotificationCommandPublisher
+    {
+        public List<BulkNotificationRequestedV1> Messages { get; } = new();
+
+        public Task PublishAsync(BulkNotificationRequestedV1 message, CancellationToken cancellationToken)
         {
-            currentUtcNow = currentUtcNow.Add(duration);
+            Messages.Add(message);
+            return exception is null ? Task.CompletedTask : Task.FromException(exception);
         }
+    }
+
+    private sealed class CallbackPublisher(
+        Func<BulkNotificationRequestedV1, CancellationToken, Task> callback)
+        : IBulkNotificationCommandPublisher
+    {
+        public Task PublishAsync(
+            BulkNotificationRequestedV1 message,
+            CancellationToken cancellationToken) => callback(message, cancellationToken);
+    }
+
+    private sealed record TestHarness(
+        NotificationDbContext Context,
+        DbContextOptions<NotificationDbContext> DatabaseOptions,
+        BulkNotificationJobService Service,
+        RecordingPublisher Publisher,
+        TimeProvider TimeProvider) : IAsyncDisposable
+    {
+        public ValueTask DisposeAsync() => Context.DisposeAsync();
+    }
+
+    private sealed class ManualTimeProvider(DateTimeOffset now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => now;
     }
 }

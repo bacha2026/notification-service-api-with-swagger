@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Notification Service — Week 1–3 Smoke Testing Guide</title>
+  <style>
+    @page { size: A4; margin: 15mm; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font: 10pt/1.48 "Segoe UI", Arial, sans-serif; color: #172033; }
+    h1 { margin: 0 0 2mm; color: #123b5d; font-size: 23pt; }
+    h2 { margin: 8mm 0 2.5mm; padding-bottom: 1.5mm; border-bottom: 1px solid #bfd0dd; color: #155e75; font-size: 15pt; }
+    h3 { margin: 5mm 0 1.5mm; color: #334155; font-size: 11pt; }
+    p, li { margin: 1.2mm 0; }
+    code { font: 8.5pt Consolas, monospace; background: #edf2f7; padding: .2mm .8mm; border-radius: 2px; }
+    pre { margin: 2mm 0; padding: 3mm; overflow-wrap: anywhere; white-space: pre-wrap; border-radius: 4px; background: #0f172a; color: #e2e8f0; font: 8pt/1.42 Consolas, monospace; }
+    table { width: 100%; border-collapse: collapse; margin: 2mm 0; }
+    th, td { border: 1px solid #cbd5e1; padding: 2mm; text-align: left; vertical-align: top; }
+    th { background: #e8f0f5; }
+    .hero { margin-bottom: 6mm; padding: 5mm; border-left: 5px solid #0891b2; background: #ecfeff; }
+    .warning { margin: 3mm 0; padding: 3mm; border-left: 4px solid #ea8a19; background: #fff7ed; }
+    .pass { color: #166534; font-weight: 700; }
+    .page-break { break-before: page; }
+  </style>
+</head>
+<body>
+  <h1>Notification Service smoke testing</h1>
+  <div class="hero">
+    <strong>Current scope:</strong> Week 1–3 .NET 8 API, SQL-backed jobs, RabbitMQ, and separate WorkerService.
+    This guide supersedes the earlier recipient/body-logging guide. Operational logs must contain identifiers and outcomes, never recipient addresses, subjects, bodies, or credentials.
+  </div>
+
+  <h2>1. Preflight and local credentials</h2>
+  <p>Run commands from the <code>notification-api</code> repository root. Docker Desktop must be using Linux containers. Ports 8080 and 15672 must be available on loopback.</p>
+  <pre>dotnet --version
+docker version
+docker compose version
+powershell -File scripts/Initialize-Week3Environment.ps1
+docker compose -f compose.week3.yml config --quiet</pre>
+  <p>The initializer creates an ignored <code>.env</code> and never prints its values. Compose fails closed if required credentials are absent. Do not paste the file into tickets, screenshots, logs, or evidence.</p>
+
+  <h2>2. Build and automated verification</h2>
+  <pre>dotnet restore NSA.sln
+dotnet build NSA.sln --configuration Release --no-restore
+dotnet test NSA.sln --configuration Release --no-build --no-restore
+dotnet ef migrations has-pending-model-changes --project NSA.csproj --configuration Release --no-build
+dotnet list NSA.sln package --vulnerable --include-transitive</pre>
+  <p class="pass">Pass condition: zero build warnings/errors, all tests pass, no pending EF model changes, and no vulnerable NuGet packages are reported.</p>
+
+  <h2>3. Start and inspect the four-service stack</h2>
+  <pre>docker compose -f compose.week3.yml build api worker
+docker compose -f compose.week3.yml up -d --force-recreate
+docker compose -f compose.week3.yml ps</pre>
+  <p>Wait until SQL Server, RabbitMQ, API, and worker all report <code>healthy</code>. Host access is deliberately loopback-only:</p>
+  <ul>
+    <li>Swagger UI: <code>http://127.0.0.1:8080/swagger</code></li>
+    <li>Liveness: <code>http://127.0.0.1:8080/health/live</code></li>
+    <li>Readiness: <code>http://127.0.0.1:8080/health/ready</code></li>
+    <li>RabbitMQ Management: <code>http://127.0.0.1:15672</code></li>
+  </ul>
+
+  <h2 class="page-break">4. Week 1–2 HTTP contract smoke</h2>
+  <p>Run the repository's repeatable 12-probe script after the API is healthy:</p>
+  <pre>powershell -File scripts/Invoke-Week12Smoke.ps1 -BaseUrl http://127.0.0.1:8080</pre>
+  <p>The helper verifies Swagger/OpenAPI, v1/v2 behavior, retirement headers, and representative RFC 7807 failures.</p>
+  <table>
+    <thead><tr><th>Area</th><th>Pass condition</th></tr></thead>
+    <tbody>
+      <tr><td>Swagger/OpenAPI</td><td>UI and v1/v2 JSON return 200; documents report OpenAPI 3.0.x.</td></tr>
+      <tr><td>Versioning</td><td>v1 and v2 routes work; v1 includes <code>Deprecation</code> and <code>Sunset</code>; v2 does not.</td></tr>
+      <tr><td>Errors</td><td>Business API errors return <code>application/problem+json</code> with status, title, instance, and trace ID.</td></tr>
+      <tr><td>CRUD</td><td>Create, list/read, update, and delete notification records; product/cart/order supporting probes succeed.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>5. Week 3 asynchronous happy path</h2>
+  <p>Use Swagger or an HTTP client to post a safe reserved-address example:</p>
+  <pre>POST /api/v2/notifications/bulk
+Content-Type: application/json
+
+{
+  "notifications": [{
+    "recipientEmail": "visitor@example.test",
+    "channel": 1,
+    "subject": "Week 3 smoke",
+    "body": "Non-sensitive training content",
+    "orderId": null
+  }]
+}</pre>
+  <p>Expect <code>202 Accepted</code>, a non-empty <code>jobId</code>, a <code>Location</code> header, and <code>X-Correlation-ID</code>. Poll the returned location until the persisted status is <code>Completed</code> or <code>CompletedWithErrors</code>. Verify <code>processedCount = succeededCount + failedCount</code>.</p>
+
+  <h2>6. Recovery and DLQ proof</h2>
+  <pre>powershell -File scripts/Invoke-Week3RestartProof.ps1
+powershell -File scripts/Invoke-Week3BrokerRestartProof.ps1
+powershell -File scripts/Invoke-Week3InFlightBrokerRestartProof.ps1
+powershell -File scripts/Invoke-Week3MalformedMessageProof.ps1 -MessageCase MalformedJson
+powershell -File scripts/Invoke-Week3MalformedMessageProof.ps1 -MessageCase UnsupportedSchema
+powershell -File scripts/Invoke-Week3MalformedMessageProof.ps1 -MessageCase WrongMessageType
+powershell -File scripts/Invoke-Week3PoisonProof.ps1</pre>
+  <p>Inspect the named DLQ <code>nsa.notifications.bulk.dlq</code> in RabbitMQ Management. Capture identifiers and counts only; redact credentials and message content. The poison helper enables failure injection only for its controlled run and restores the normal empty setting.</p>
+
+  <h2 class="page-break">7. Health failure and recovery</h2>
+  <p>When a dependency is deliberately stopped, process liveness must remain 200 while dependency readiness becomes 503. The worker must lose its healthy marker, then both services must recover after the dependency restarts. Use the recorded evidence procedure; do not delete volumes.</p>
+
+  <h2>8. Stop safely</h2>
+  <pre>docker compose -f compose.week3.yml down</pre>
+  <div class="warning">Do not add <code>--volumes</code> unless the owner explicitly intends to discard local SQL and RabbitMQ data. The generated credentials and named volumes are coupled; deleting or rotating only one side can make an existing volume inaccessible.</div>
+
+  <h2>Evidence and boundaries</h2>
+  <p>Store results under <code>evidence/week-01</code>, <code>evidence/week-02</code>, and <code>evidence/week-03</code>. The technical checks do not prove Skill IQ submissions, GitHub/PR publication, EM reviews, EM-supplied React snippets, Gist publication, or live presentation delivery.</p>
+  <p>Week 3 provides at-least-once delivery, not exactly once. Outbox, Inbox, HTTP idempotency, stable provider-side deduplication, Vault, CI/GHCR, and blue/green cutover remain later-week work.</p>
+</body>
+</html>

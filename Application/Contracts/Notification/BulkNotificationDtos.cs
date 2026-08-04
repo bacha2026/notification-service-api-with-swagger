@@ -60,8 +60,8 @@ public sealed record CreateBulkNotificationsRequest
 /// <summary>Progress and outcome of a queued bulk notification job.</summary>
 public sealed record BulkNotificationJobDto
 {
-    public BulkNotificationJobDto(Guid jobId, string status, int totalCount, int processedCount, int succeededCount, int failedCount, DateTimeOffset queuedAtUtc, DateTimeOffset? startedAtUtc, DateTimeOffset? completedAtUtc, string? error) =>
-        (JobId, Status, TotalCount, ProcessedCount, SucceededCount, FailedCount, QueuedAtUtc, StartedAtUtc, CompletedAtUtc, Error) = (jobId, status, totalCount, processedCount, succeededCount, failedCount, queuedAtUtc, startedAtUtc, completedAtUtc, error);
+    public BulkNotificationJobDto(Guid jobId, string status, int totalCount, int processedCount, int succeededCount, int failedCount, DateTimeOffset queuedAtUtc, DateTimeOffset? startedAtUtc, DateTimeOffset? completedAtUtc, string? error, string? correlationId = null) =>
+        (JobId, Status, TotalCount, ProcessedCount, SucceededCount, FailedCount, QueuedAtUtc, StartedAtUtc, CompletedAtUtc, Error, CorrelationId) = (jobId, status, totalCount, processedCount, succeededCount, failedCount, queuedAtUtc, startedAtUtc, completedAtUtc, error, correlationId);
 
     /// <summary>Unique identifier used to query the job.</summary>
     public Guid JobId { get; init; }
@@ -83,4 +83,6 @@ public sealed record BulkNotificationJobDto
     public DateTimeOffset? CompletedAtUtc { get; init; }
     /// <summary>Job-level error message when processing could not complete; otherwise null.</summary>
     public string? Error { get; init; }
+    /// <summary>Correlation identifier shared by the HTTP request, broker command, worker logs, and DLQ entry.</summary>
+    public string? CorrelationId { get; init; }
 }

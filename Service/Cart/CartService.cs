@@ -76,7 +76,7 @@ public sealed class CartService(ICartRepository cartRepository, IConfiguration c
     private string ResolveVisitorEmail(string visitorEmail)
     {
         return string.IsNullOrWhiteSpace(visitorEmail)
-            ? configuration["NotificationEmails:DefaultVisitorEmail"] ?? "bmacha2015@gmail.com"
+            ? configuration["NotificationEmails:DefaultVisitorEmail"] ?? "visitor@example.test"
             : visitorEmail.Trim();
     }
 

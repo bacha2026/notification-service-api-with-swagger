@@ -182,21 +182,21 @@
       <div class="cover-grid">
         <div><div class="cover-label">Prepared for</div><div class="cover-value">Bethoven Acha</div></div>
         <div><div class="cover-label">Target</div><div class="cover-value">Grade 4 / Senior readiness</div></div>
-        <div><div class="cover-label">Prepared on</div><div class="cover-value">13 July 2026</div></div>
+        <div><div class="cover-label">Prepared on</div><div class="cover-value">Updated 20 July 2026</div></div>
         <div><div class="cover-label">Schedule</div><div class="cover-value">6 weeks · approximately 20 hours/week</div></div>
         <div><div class="cover-label">Anchor repository</div><div class="cover-value">NSA / Notification Service API</div></div>
-        <div><div class="cover-label">Baseline</div><div class="cover-value">main @ 91d94c0 plus current local restructuring</div></div>
+        <div><div class="cover-label">Baseline</div><div class="cover-value">main @ c0f145c plus reviewed Week 3 working tree</div></div>
       </div>
     </div>
 
     <div style="margin-top:18mm" class="grid-3">
       <div class="card" style="background:rgba(255,255,255,.1);border-color:rgba(255,255,255,.3)">
         <div class="metric" style="color:#fff">W1–W2</div>
-        <div class="metric-label" style="color:#d8e6f2">Substantially built; verification and evidence remain</div>
+        <div class="metric-label" style="color:#d8e6f2">Technical checks pass; external acceptance remains</div>
       </div>
       <div class="card" style="background:rgba(255,255,255,.1);border-color:rgba(255,255,255,.3)">
-        <div class="metric" style="color:#fff">W3–W6</div>
-        <div class="metric-label" style="color:#d8e6f2">Major implementation phases still planned</div>
+        <div class="metric" style="color:#fff">W3 / W4–W6</div>
+        <div class="metric-label" style="color:#d8e6f2">W3 technical pass; later phases planned</div>
       </div>
       <div class="card" style="background:rgba(255,255,255,.1);border-color:rgba(255,255,255,.3)">
         <div class="metric" style="color:#fff">5 gates</div>
@@ -266,12 +266,12 @@
     <table>
       <thead><tr><th style="width:11%">Week</th><th style="width:18%">State</th><th>Evidence already present</th><th>Work still required</th></tr></thead>
       <tbody>
-        <tr><td><strong>1</strong></td><td><span class="status partial">VERIFY / HARDEN</span></td><td>.NET 8 CRUD API; Swagger; XML docs; EF migrations; draw.io architecture file; project builds cleanly.</td><td>Skill IQ proof; GitHub/PR proof; documentation completeness audit; 30-minute design evidence; one-page decision record; repeatable smoke checks.</td></tr>
-        <tr><td><strong>2</strong></td><td><span class="status partial">VERIFY / HARDEN</span></td><td>v1/v2 routes; deprecation/sunset headers; Problem Details; 3 ADRs; Polly retry/circuit breaker; in-memory bulk queue, worker, and status endpoint.</td><td>Automated error/version/resilience tests; measured 202 latency under 100 ms; ADR alternatives/tradeoffs; enabled-provider failure demo; EM Review #1.</td></tr>
-        <tr><td><strong>3</strong></td><td><span class="status planned">PLANNED</span></td><td>Week 2 in-process flow provides a migration starting point.</td><td>RabbitMQ; separate WorkerService; persisted job status; DLQ; Docker Desktop run; 10 React fixes; ADR presentation.</td></tr>
-        <tr><td><strong>4</strong></td><td><span class="status planned">PLANNED</span></td><td>EF Core and SQL Server already in use.</td><td>Idempotency; transactional Outbox; broker-down recovery proof; four-mode Next.js app; CI and GHCR workflow; EM Review #2.</td></tr>
-        <tr><td><strong>5</strong></td><td><span class="status planned">PLANNED</span></td><td>Current application has a SQL dependency and clear configuration points.</td><td>React polish; Angular OnPush demo; full Compose stack; Vault bootstrap; re-runnable provisioning; unit/integration test expansion.</td></tr>
-        <tr><td><strong>6</strong></td><td><span class="status planned">PLANNED</span></td><td>No deployment automation found.</td><td>Nginx blue/green topology; health-gated switch; one-command rollback; availability proof; retakes; final live assessment.</td></tr>
+        <tr><td><strong>1</strong></td><td><span class="status partial">TECHNICAL PASS / EXTERNAL PENDING</span></td><td>.NET 8 CRUD API; OpenAPI 3.0 v1/v2 documents and Swagger; endpoint/status XML docs; EF migrations; 12-probe smoke run; real-time draw.io source, PDF/PNG export, and one-page decision; clean solution build and 76 tests.</td><td>Skill IQ proof, GitHub/PR/reviewer proof, and a recorded human 30-minute design-session attendance record.</td></tr>
+        <tr><td><strong>2</strong></td><td><span class="status partial">TECHNICAL PASS / EXTERNAL PENDING</span></td><td>v1/v2 routes and retirement headers; RFC 7807 error matrix; 3 accepted technical ADRs; Polly retry/circuit/timeout tests; stable 202/status lifecycle; measured p95 below 100 ms. The Week 2 in-process worker evidence is retained as a historical stage and superseded by Week 3.</td><td>Real-provider idempotency/deduplication contract and EM Code Review #1 findings/sign-off.</td></tr>
+        <tr><td><strong>3</strong></td><td><span class="status partial">TECHNICAL PASS / EXTERNAL PENDING</span></td><td>Separate WorkerService; SQL-backed jobs; RabbitMQ quorum queues and DLQ; dependency-aware readiness; healthy four-service Docker stack; 76 tests; restart, in-flight broker, poison, malformed, unsupported-schema/type, correlation, and 503 evidence; ten local React corrections; 15-minute deck and PDF.</td><td>Replace the clearly labeled substitute React set with the ten EM-supplied snippets or record EM approval, publish the authorized Gist, deliver the presentation, and capture reviewer feedback.</td></tr>
+        <tr><td><strong>4</strong></td><td><span class="status planned">FOUNDATION READY / PLANNED</span></td><td>EF Core/SQL and versioned stable broker identifiers are in place; the workspace-sibling Next.js scaffold has a passing production build and zero production audit findings.</td><td>Approve the repository boundary; add HTTP idempotency, transactional Outbox/relay, Inbox/provider deduplication and outage proof; implement the four rendering modes, tests, CI/GHCR, and EM Review #2.</td></tr>
+        <tr><td><strong>5</strong></td><td><span class="status planned">FOUNDATION READY / PLANNED</span></td><td>The current Compose stack already has network, durable volumes, SQL, RabbitMQ, API/worker health gates, and generated ignored credentials; the sibling Angular scaffold builds and tests.</td><td>React polish; focused Angular OnPush behavior; Vault bootstrap and least-privilege retrieval; re-runnable POSIX provisioning; container-backed integration-test expansion and frontend audit.</td></tr>
+        <tr><td><strong>6</strong></td><td><span class="status planned">FOUNDATION READY / PLANNED</span></td><td>API process liveness and dependency-aware SQL/RabbitMQ readiness already exist; API and worker are containerized and independently runnable.</td><td>Remove startup migration ownership from deployment colors; add expand/contract migration gates, immutable images, Nginx blue/green topology, health-gated switch, one-command rollback, availability proof, retakes, and final live assessment.</td></tr>
       </tbody>
     </table>
 
@@ -290,7 +290,7 @@
       <tr><td class="artifact">src/NSA.Worker</td><td>RabbitMQ consumer, retry/dead-letter handling, notification delivery.</td></tr>
       <tr><td class="artifact">src/NSA.Domain · Application · Infrastructure</td><td>Shared domain rules, use cases/contracts, persistence and provider adapters. Split only when it reduces coupling; avoid a cosmetic rewrite.</td></tr>
       <tr><td class="artifact">tests/NSA.UnitTests · NSA.IntegrationTests</td><td>Fast domain/application tests and container-backed API/broker/database tests.</td></tr>
-      <tr><td class="artifact">web/rendering-lab · web/angular-onpush-demo</td><td>Next.js rendering-mode evidence and focused Angular change-detection evidence.</td></tr>
+      <tr><td class="artifact">../rendering-lab · ../angular-onpush-demo</td><td>Workspace-sibling Next.js rendering-mode evidence and focused Angular change-detection evidence; repository integration must be decided before Week 4 CI.</td></tr>
       <tr><td class="artifact">deploy/compose · deploy/blue-green</td><td>Local infrastructure, Vault bootstrap, Nginx switching, rollback and demo scripts.</td></tr>
       <tr><td class="artifact">docs/adr · evidence/week-XX</td><td>Decisions and reviewable proof: commands, screenshots, timings, and demo notes.</td></tr>
     </table>
@@ -304,8 +304,8 @@
     <div class="callout"><strong>Week objective:</strong> convert the current implementation into a clean, reviewable Week 1 baseline rather than rebuilding working features. Record external assessments before course work.</div>
 
     <div class="grid-2">
-      <div class="card"><h4>Current evidence</h4><p>.NET 8 API, CRUD controllers, EF Core, Swagger at <code>/swagger</code>, XML endpoint comments, acceptance notes, and <code>drawio/notification.drawio</code>.</p></div>
-      <div class="card"><h4>Primary gaps</h4><p>Skill IQ evidence, GitHub/PR evidence, documentation completeness, decision-paper linkage, timed design proof, and automated smoke coverage.</p></div>
+      <div class="card"><h4>Current evidence</h4><p>.NET 8 CRUD API, EF Core migrations, OpenAPI 3.0 and Swagger at <code>/swagger</code>, complete endpoint/status documentation, automated contract/CRUD checks, repeatable live smoke probes, and a readable real-time order-tracking source/export with a linked one-page decision.</p></div>
+      <div class="card"><h4>Remaining external evidence</h4><p>Skill IQ submission, GitHub branch/PR/reviewer record, and attendance metadata for the required human 30-minute design exercise. These cannot be inferred from local files.</p></div>
     </div>
 
     <h3>Five-day execution sequence</h3>
@@ -345,8 +345,8 @@
     <div class="callout"><strong>Week objective:</strong> harden the existing Week 2 implementation with explicit contracts and measurable proof, then pass EM Code Review #1.</div>
 
     <div class="grid-2">
-      <div class="card"><h4>Current evidence</h4><p>v1/v2 routes, deprecation headers, Problem Details handler/pages, three ADRs, typed Postbound client with retry/circuit breaker, in-memory job channel, hosted worker, 202 and status routes.</p></div>
-      <div class="card"><h4>Primary gaps</h4><p>No automated tests, resilience transcript, latency measurement, or external review. Polly is bypassed while Postbound is disabled; bulk work currently persists records but does not call the sender.</p></div>
+      <div class="card"><h4>Current evidence</h4><p>v1/v2 routes, deprecation/sunset headers, Problem Details handler/pages and live error matrix, three detailed ADRs, deterministic Polly retry/circuit/timeout tests, stable 202/status routes, lifecycle proof, and measured p95 below 100 ms. Week 3 now supersedes the historical in-memory worker with RabbitMQ and a separate WorkerService.</p></div>
+      <div class="card"><h4>Remaining external/production evidence</h4><p>EM Code Review #1 is not yet delivered. Postbound remains safely disabled until its real authentication, schema, and duplicate-prevention contract is verified; deterministic local resilience tests do not substitute for provider approval.</p></div>
     </div>
 
     <h3>Five-day execution sequence</h3>
@@ -605,7 +605,8 @@
         <tr><td>Ten React snippets and Grade 4 rubric are external.</td><td><span class="status blocked">HIGH</span></td><td>Request snippets by W2 and rubric by W4. If unavailable, use an agreed substitute set and document the deviation.</td><td>EM<br>W2 / W4</td></tr>
         <tr><td>Approximately 120 hours for a broad full-stack program.</td><td><span class="status partial">MEDIUM</span></td><td>Timebox courses, reuse the anchor project, enforce weekly scope, and prioritize acceptance paths. Carry work only through an explicit review decision.</td><td>Bethoven<br>Daily</td></tr>
         <tr><td>Current worktree has many uncommitted moves.</td><td><span class="status blocked">HIGH</span></td><td>Review, build, and checkpoint the local state before architectural splitting. Never clean/reset files without confirming ownership.</td><td>Bethoven<br>W1 Day 1</td></tr>
-        <tr><td>No automated test projects currently found.</td><td><span class="status blocked">HIGH</span></td><td>Add critical tests in Weeks 1–4 so CI has value; expand in Week 5. Do not postpone all test work to Week 5.</td><td>Bethoven<br>Start W1</td></tr>
+        <tr><td>Root-level frontend apps sit outside the backend Git repository.</td><td><span class="status blocked">HIGH</span></td><td>Approve ADR 005 and establish one checkout boundary before Week 4. A workflow inside <code>notification-api</code> cannot version or build its workspace siblings.</td><td>Bethoven + EM<br>Before W4</td></tr>
+        <tr><td>Automated suite exists; container-backed integration coverage is still script-based.</td><td><span class="status partial">MEDIUM</span></td><td>Keep the solution-wide unit/contract suite in CI and convert critical SQL/RabbitMQ scripts into container-backed integration tests in Week 5.</td><td>Bethoven<br>W5</td></tr>
         <tr><td>Retries or at-least-once delivery can duplicate email.</td><td><span class="status partial">MEDIUM</span></td><td>Document at-least-once Rabbit delivery. Use stable provider/message IDs plus Inbox/idempotent side effects; do not enable unsafe POST retries without a provider deduplication contract.</td><td>Bethoven<br>W2–W4</td></tr>
         <tr><td>Vault bootstrap can leak root material.</td><td><span class="status blocked">HIGH</span></td><td>Generate locally, store only in ignored/Docker-secret locations, redact output, use least-privilege app auth, and run a secret scan.</td><td>Bethoven<br>W5</td></tr>
         <tr><td><code>provision.sh</code> on Windows is underspecified.</td><td><span class="status partial">MEDIUM</span></td><td>Standardize on Git Bash or WSL, validate line endings and POSIX syntax, list prerequisites, and test on a clean profile.</td><td>Bethoven<br>W5</td></tr>
@@ -620,7 +621,7 @@
       <li>Whether Week 1’s decision page is separate from ADR 001.</li>
       <li>Exact v1/v2 semantic difference, if the EM expects more than parallel routes.</li>
       <li>RabbitMQ client/library and topology; job-retention period; retry and DLQ thresholds.</li>
-      <li>Idempotency endpoint scope and retention; Next.js/router version; GitHub branch and image conventions.</li>
+      <li>Repository-root strategy in ADR 005; idempotency endpoint scope and retention; Next.js/router version; GitHub branch and image conventions.</li>
       <li>Clean-machine definition, Git Bash versus WSL, Vault mode, and final readiness rubric.</li>
     </ol>
 

@@ -1,244 +1,286 @@
-using Microsoft.Extensions.DependencyInjection;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using NSA.Application.Abstractions;
 using NSA.Application.Contracts;
+using NSA.Application.Exceptions;
+using NSA.Domain.Entities;
 using NSA.Domain.Enums;
-using NSA.Infrastructure.BackgroundServices;
+using NSA.Infrastructure.Messaging;
+using NSA.Persistence;
 using NSA.Service;
 
 namespace NSA.Tests;
 
-public sealed class BulkNotificationWorkerTests
+public sealed class BulkNotificationProcessorTests
 {
     [Fact]
-    public async Task Worker_exposes_processing_then_completed_for_a_successful_job()
+    public async Task Processor_persists_progress_and_completes_a_successful_job()
     {
-        var notificationService = new ControlledNotificationService(pauseFirstCall: true);
-        await using var provider = BuildProvider(notificationService);
-        var jobs = new BulkNotificationJobService();
-        var worker = CreateWorker(jobs, provider.GetRequiredService<IServiceScopeFactory>());
+        await using var context = CreateContext();
+        var job = CreateJob("first", "second");
+        context.BulkNotificationJobs.Add(job);
+        await context.SaveChangesAsync();
+        var dispatcher = new ControlledDispatcher();
+        var processor = CreateProcessor(context, dispatcher);
 
-        await worker.StartAsync(CancellationToken.None);
-        try
-        {
-            var queued = jobs.Queue(CreateRequest("success"));
-            await notificationService.FirstCallStarted.WaitAsync(TimeSpan.FromSeconds(2));
+        await processor.ProcessAsync(job.Id, CancellationToken.None);
 
-            var processing = jobs.GetStatus(queued.JobId);
-            Assert.NotNull(processing);
-            Assert.Equal("Processing", processing.Status);
-            Assert.NotNull(processing.StartedAtUtc);
-            Assert.Null(processing.CompletedAtUtc);
+        Assert.Equal(BulkNotificationJobStatuses.Completed, job.Status);
+        Assert.Equal(2, job.ProcessedCount);
+        Assert.Equal(2, job.SucceededCount);
+        Assert.Equal(0, job.FailedCount);
+        Assert.NotNull(job.StartedAtUtc);
+        Assert.NotNull(job.CompletedAtUtc);
+        Assert.All(job.Items, item => Assert.Equal(BulkNotificationItemStatuses.Succeeded, item.Status));
+        Assert.Equal(new[] { "first", "second" }, dispatcher.Subjects);
 
-            notificationService.ReleaseFirstCall();
-            var completed = await WaitForTerminalStatusAsync(jobs, queued.JobId);
-
-            Assert.Equal("Completed", completed.Status);
-            Assert.Equal(1, completed.ProcessedCount);
-            Assert.Equal(1, completed.SucceededCount);
-            Assert.Equal(0, completed.FailedCount);
-            Assert.Null(completed.Error);
-            Assert.NotNull(completed.CompletedAtUtc);
-        }
-        finally
-        {
-            notificationService.ReleaseFirstCall();
-            await StopWorkerAsync(worker);
-        }
+        await processor.ProcessAsync(job.Id, CancellationToken.None);
+        Assert.Equal(2, dispatcher.Subjects.Count);
     }
 
     [Fact]
-    public async Task Worker_counts_an_item_failure_and_continues_the_remaining_job()
+    public async Task Processor_recovers_a_publish_failed_job_when_an_ambiguous_command_arrives()
     {
-        var notificationService = new ControlledNotificationService(failingSubject: "fail");
-        await using var provider = BuildProvider(notificationService);
-        var jobs = new BulkNotificationJobService();
-        var worker = CreateWorker(jobs, provider.GetRequiredService<IServiceScopeFactory>());
+        await using var context = CreateContext();
+        var job = CreateJob("ambiguous-confirm");
+        job.Status = BulkNotificationJobStatuses.PublishFailed;
+        job.CompletedAtUtc = DateTimeOffset.UtcNow.AddMinutes(-1);
+        job.Error = "The persisted job could not be published to the message broker.";
+        context.BulkNotificationJobs.Add(job);
+        await context.SaveChangesAsync();
+        var dispatcher = new ControlledDispatcher();
+        var processor = CreateProcessor(context, dispatcher);
 
-        await worker.StartAsync(CancellationToken.None);
-        try
-        {
-            var queued = jobs.Queue(CreateRequest("succeed", "fail", "also-succeed"));
-            var completed = await WaitForTerminalStatusAsync(jobs, queued.JobId);
+        var disposition = await processor.ProcessAsync(job.Id, CancellationToken.None);
 
-            Assert.Equal("CompletedWithErrors", completed.Status);
-            Assert.Equal(3, completed.ProcessedCount);
-            Assert.Equal(2, completed.SucceededCount);
-            Assert.Equal(1, completed.FailedCount);
-            Assert.Equal("One or more notifications could not be processed.", completed.Error);
-            Assert.Equal(new[] { "succeed", "fail", "also-succeed" }, notificationService.Subjects);
-        }
-        finally
-        {
-            await StopWorkerAsync(worker);
-        }
+        Assert.Equal(BulkNotificationProcessDisposition.Acknowledge, disposition);
+        Assert.Equal(BulkNotificationJobStatuses.Completed, job.Status);
+        Assert.Equal(1, job.ProcessedCount);
+        Assert.Equal(new[] { "ambiguous-confirm" }, dispatcher.Subjects);
+        Assert.NotNull(job.CompletedAtUtc);
+        Assert.Null(job.Error);
     }
 
     [Fact]
-    public async Task Worker_marks_an_inflight_job_cancelled_during_graceful_shutdown()
+    public async Task Processor_returns_dead_letter_for_a_redelivered_dead_lettered_job()
     {
-        var notificationService = new ControlledNotificationService(pauseFirstCall: true);
-        await using var provider = BuildProvider(notificationService);
-        var jobs = new BulkNotificationJobService();
-        var worker = CreateWorker(jobs, provider.GetRequiredService<IServiceScopeFactory>());
+        await using var context = CreateContext();
+        var job = CreateJob("already-dead-lettered");
+        job.Status = BulkNotificationJobStatuses.DeadLettered;
+        job.CompletedAtUtc = DateTimeOffset.UtcNow;
+        context.BulkNotificationJobs.Add(job);
+        await context.SaveChangesAsync();
+        var dispatcher = new ControlledDispatcher();
+        var processor = CreateProcessor(context, dispatcher);
 
-        await worker.StartAsync(CancellationToken.None);
-        var queued = jobs.Queue(CreateRequest("inflight"));
-        await notificationService.FirstCallStarted.WaitAsync(TimeSpan.FromSeconds(2));
+        var disposition = await processor.ProcessAsync(job.Id, CancellationToken.None);
 
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-        await worker.StopAsync(timeout.Token);
-        var cancelled = jobs.GetStatus(queued.JobId);
-        worker.Dispose();
-
-        Assert.NotNull(cancelled);
-        Assert.Equal("Cancelled", cancelled.Status);
-        Assert.Equal(0, cancelled.ProcessedCount);
-        Assert.NotNull(cancelled.CompletedAtUtc);
+        Assert.Equal(BulkNotificationProcessDisposition.DeadLetter, disposition);
+        Assert.Empty(dispatcher.Subjects);
     }
 
-    private static ServiceProvider BuildProvider(ControlledNotificationService notificationService) =>
-        new ServiceCollection()
-            .AddScoped<INotificationService>(_ => notificationService)
-            .AddScoped<INotificationDispatcher>(_ => new ControlledNotificationDispatcher(notificationService))
-            .BuildServiceProvider();
-
-    private static BulkNotificationWorker CreateWorker(BulkNotificationJobService jobs, IServiceScopeFactory scopeFactory) =>
-        new(jobs, scopeFactory, NullLogger<BulkNotificationWorker>.Instance);
-
-    private static CreateBulkNotificationsRequest CreateRequest(params string[] subjects) =>
-        new(subjects.Select(subject => new BulkNotificationItemRequest(
-            $"{subject}@example.com",
-            NotificationChannel.Email,
-            subject,
-            "Body",
-            null)).ToArray());
-
-    private static async Task<BulkNotificationJobDto> WaitForTerminalStatusAsync(
-        BulkNotificationJobService jobs,
-        Guid jobId)
+    [Fact]
+    public async Task Processor_records_permanent_validation_failure_and_continues()
     {
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
-        while (!timeout.IsCancellationRequested)
+        await using var context = CreateContext();
+        var job = CreateJob("good", "invalid", "also-good");
+        context.BulkNotificationJobs.Add(job);
+        await context.SaveChangesAsync();
+        var dispatcher = new ControlledDispatcher(permanentFailureSubject: "invalid");
+        var processor = CreateProcessor(context, dispatcher);
+
+        await processor.ProcessAsync(job.Id, CancellationToken.None);
+
+        Assert.Equal(BulkNotificationJobStatuses.CompletedWithErrors, job.Status);
+        Assert.Equal(3, job.ProcessedCount);
+        Assert.Equal(2, job.SucceededCount);
+        Assert.Equal(1, job.FailedCount);
+        Assert.Equal(BulkNotificationItemStatuses.Failed, job.Items.Single(item => item.Subject == "invalid").Status);
+        Assert.Equal(new[] { "good", "invalid", "also-good" }, dispatcher.Subjects);
+    }
+
+    [Fact]
+    public async Task Processor_leaves_transient_failure_for_command_level_retry()
+    {
+        await using var context = CreateContext();
+        var job = CreateJob("transient");
+        context.BulkNotificationJobs.Add(job);
+        await context.SaveChangesAsync();
+        var processor = CreateProcessor(
+            context,
+            new ControlledDispatcher(transientFailureSubject: "transient"));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            processor.ProcessAsync(job.Id, CancellationToken.None));
+
+        context.ChangeTracker.Clear();
+        var persisted = await context.BulkNotificationJobs
+            .Include(candidate => candidate.Items)
+            .SingleAsync(candidate => candidate.Id == job.Id);
+        Assert.Equal(BulkNotificationJobStatuses.Processing, persisted.Status);
+        Assert.Equal(0, persisted.ProcessedCount);
+        Assert.Equal(BulkNotificationItemStatuses.Pending, Assert.Single(persisted.Items).Status);
+    }
+
+    [Fact]
+    public async Task Opt_in_failure_injection_provides_a_deterministic_poison_path()
+    {
+        await using var context = CreateContext();
+        var job = CreateJob("[week3-poison]");
+        context.BulkNotificationJobs.Add(job);
+        await context.SaveChangesAsync();
+        var processor = CreateProcessor(
+            context,
+            new ControlledDispatcher(),
+            failureInjectionSubject: "[week3-poison]");
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            processor.ProcessAsync(job.Id, CancellationToken.None));
+
+        Assert.Equal(BulkNotificationJobStatuses.Queued, job.Status);
+        Assert.Equal(0, job.ProcessedCount);
+    }
+
+    [Fact]
+    public async Task Retry_and_dead_letter_transitions_are_persisted_for_the_status_endpoint()
+    {
+        await using var context = CreateContext();
+        var job = CreateJob("retry");
+        context.BulkNotificationJobs.Add(job);
+        await context.SaveChangesAsync();
+        var processor = CreateProcessor(context, new ControlledDispatcher());
+
+        await processor.RecordRetryAsync(job.Id, completedAttempts: 1, maxAttempts: 3, CancellationToken.None);
+        Assert.Equal(BulkNotificationJobStatuses.Retrying, job.Status);
+        Assert.Null(job.CompletedAtUtc);
+        Assert.Contains("1 of 3", job.Error, StringComparison.Ordinal);
+
+        await processor.MarkDeadLetteredAsync(job.Id, attempts: 3, CancellationToken.None);
+        Assert.Equal(BulkNotificationJobStatuses.DeadLettered, job.Status);
+        Assert.NotNull(job.CompletedAtUtc);
+        Assert.Contains("3 attempts", job.Error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Ambiguous_publish_failure_can_transition_through_retry_to_dead_letter()
+    {
+        await using var context = CreateContext();
+        var job = CreateJob("ambiguous-poison");
+        job.Status = BulkNotificationJobStatuses.PublishFailed;
+        job.CompletedAtUtc = DateTimeOffset.UtcNow;
+        context.BulkNotificationJobs.Add(job);
+        await context.SaveChangesAsync();
+        var processor = CreateProcessor(context, new ControlledDispatcher());
+
+        await processor.RecordRetryAsync(job.Id, completedAttempts: 1, maxAttempts: 3, CancellationToken.None);
+        Assert.Equal(BulkNotificationJobStatuses.Retrying, job.Status);
+
+        await processor.MarkDeadLetteredAsync(job.Id, attempts: 3, CancellationToken.None);
+        Assert.Equal(BulkNotificationJobStatuses.DeadLettered, job.Status);
+        Assert.Contains("3 attempts", job.Error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Processor_rejects_a_command_for_an_unknown_job()
+    {
+        await using var context = CreateContext();
+        var processor = CreateProcessor(context, new ControlledDispatcher());
+
+        await Assert.ThrowsAsync<BulkNotificationJobNotFoundException>(() =>
+            processor.ProcessAsync(Guid.NewGuid(), CancellationToken.None));
+    }
+
+    private static NotificationDbContext CreateContext() =>
+        new(new DbContextOptionsBuilder<NotificationDbContext>()
+            .UseInMemoryDatabase($"bulk-processor-{Guid.NewGuid():N}")
+            .Options);
+
+    private static BulkNotificationProcessor CreateProcessor(
+        NotificationDbContext context,
+        INotificationDispatcher dispatcher,
+        string? failureInjectionSubject = null) =>
+        new(
+            context,
+            dispatcher,
+            new UnsupportedNotificationService(),
+            Options.Create(new RabbitMqOptions { FailureInjectionSubject = failureInjectionSubject }),
+            TimeProvider.System,
+            NullLogger<BulkNotificationProcessor>.Instance);
+
+    private static BulkNotificationJob CreateJob(params string[] subjects)
+    {
+        var jobId = Guid.NewGuid();
+        return new BulkNotificationJob
         {
-            var status = jobs.GetStatus(jobId);
-            if (status is not null && status.Status is "Completed" or "CompletedWithErrors")
+            Id = jobId,
+            Status = BulkNotificationJobStatuses.Queued,
+            MessageSchemaVersion = BulkNotificationRequestedV1.CurrentSchemaVersion,
+            CorrelationId = $"correlation-{jobId:N}",
+            TotalCount = subjects.Length,
+            QueuedAtUtc = DateTimeOffset.UtcNow,
+            Items = subjects.Select((subject, sequence) => new BulkNotificationJobItem
             {
-                return status;
-            }
-
-            await Task.Delay(10, timeout.Token);
-        }
-
-        throw new TimeoutException($"Job {jobId} did not reach a terminal state.");
+                JobId = jobId,
+                Sequence = sequence,
+                RecipientEmail = $"{sequence}@example.com",
+                Channel = NotificationChannel.Email,
+                Subject = subject,
+                Body = "Body",
+                Status = BulkNotificationItemStatuses.Pending
+            }).ToList()
+        };
     }
 
-    private static async Task StopWorkerAsync(BulkNotificationWorker worker)
+    private sealed class ControlledDispatcher(
+        string? permanentFailureSubject = null,
+        string? transientFailureSubject = null) : INotificationDispatcher
     {
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-        await worker.StopAsync(timeout.Token);
-        worker.Dispose();
-    }
+        public List<string> Subjects { get; } = new();
 
-    private sealed class ControlledNotificationService(
-        bool pauseFirstCall = false,
-        string? failingSubject = null) : INotificationService
-    {
-        private readonly TaskCompletionSource firstCallStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        private readonly TaskCompletionSource firstCallRelease = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        private readonly List<string> subjects = new();
-        private int nextId;
-
-        public Task FirstCallStarted => firstCallStarted.Task;
-
-        public IReadOnlyList<string> Subjects
-        {
-            get
-            {
-                lock (subjects)
-                {
-                    return subjects.ToArray();
-                }
-            }
-        }
-
-        public void ReleaseFirstCall() => firstCallRelease.TrySetResult();
-
-        public Task<IReadOnlyList<NotificationDto>> GetNotificationsAsync(
-            string? recipientEmail,
-            int? orderId,
-            CancellationToken cancellationToken) => throw new NotSupportedException();
-
-        public Task<NotificationDto?> GetNotificationAsync(int id, CancellationToken cancellationToken) =>
-            throw new NotSupportedException();
-
-        public async Task<NotificationDto> CreateNotificationAsync(
-            CreateNotificationRequest request,
-            CancellationToken cancellationToken)
-        {
-            lock (subjects)
-            {
-                subjects.Add(request.Subject);
-            }
-
-            if (pauseFirstCall && firstCallStarted.TrySetResult())
-            {
-                await firstCallRelease.Task.WaitAsync(cancellationToken);
-            }
-
-            if (request.Subject == failingSubject)
-            {
-                throw new InvalidOperationException($"Simulated failure for {request.Subject}.");
-            }
-
-            var now = DateTimeOffset.UtcNow;
-            return new NotificationDto(
-                Interlocked.Increment(ref nextId),
-                request.RecipientEmail,
-                request.Channel,
-                request.Subject,
-                request.Body,
-                request.OrderId,
-                false,
-                now,
-                null);
-        }
-
-        public Task<NotificationDto?> UpdateNotificationAsync(
-            int id,
-            UpdateNotificationRequest request,
-            CancellationToken cancellationToken) => throw new NotSupportedException();
-
-        public Task<bool> DeleteNotificationAsync(int id, CancellationToken cancellationToken) =>
-            throw new NotSupportedException();
-    }
-
-    private sealed class ControlledNotificationDispatcher(ControlledNotificationService notificationService)
-        : INotificationDispatcher
-    {
-        public async Task<NSA.Domain.Entities.Notification> CreateEmailNotificationAsync(
+        public Task<Notification> CreateEmailNotificationAsync(
             string recipientEmail,
             string subject,
             string body,
             int? orderId,
             CancellationToken cancellationToken)
         {
-            await notificationService.CreateNotificationAsync(
-                new CreateNotificationRequest(
-                    recipientEmail,
-                    NotificationChannel.Email,
-                    subject,
-                    body,
-                    orderId),
-                cancellationToken);
+            Subjects.Add(subject);
+            if (subject == permanentFailureSubject)
+            {
+                throw new RequestValidationException("The item is invalid.");
+            }
 
-            return NSA.Domain.Entities.Notification.Create(
+            if (subject == transientFailureSubject)
+            {
+                throw new InvalidOperationException("Transient dependency failure.");
+            }
+
+            return Task.FromResult(Notification.Create(
                 recipientEmail,
                 NotificationChannel.Email,
                 subject,
                 body,
                 orderId,
-                DateTimeOffset.UtcNow);
+                DateTimeOffset.UtcNow));
         }
+    }
+
+    private sealed class UnsupportedNotificationService : INotificationService
+    {
+        public Task<IReadOnlyList<NotificationDto>> GetNotificationsAsync(string? recipientEmail, int? orderId, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public Task<NotificationDto?> GetNotificationAsync(int id, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public Task<NotificationDto> CreateNotificationAsync(CreateNotificationRequest request, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public Task<NotificationDto?> UpdateNotificationAsync(int id, UpdateNotificationRequest request, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public Task<bool> DeleteNotificationAsync(int id, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
     }
 }

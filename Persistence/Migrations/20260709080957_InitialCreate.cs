@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -134,8 +134,8 @@ namespace NSA.Persistence.Migrations
                 columns: new[] { "Id", "CreatedAtUtc", "DeliveryStatus", "FulfillmentStatus", "OrderStatus", "PaymentStatus", "TotalAmount", "UpdatedAtUtc", "VisitorEmail" },
                 values: new object[,]
                 {
-                    { 1, new DateTimeOffset(new DateTime(2026, 7, 8, 3, 30, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)), "Delivered", "AssignedToRider", "Delivered", "Paid", 1277.00m, new DateTimeOffset(new DateTime(2026, 7, 8, 5, 15, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)), "bmacha2015@gmail.com" },
-                    { 2, new DateTimeOffset(new DateTime(2026, 7, 9, 1, 45, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)), "WaitingForRider", "Packing", "Preparing", "Paid", 1398.00m, new DateTimeOffset(new DateTime(2026, 7, 9, 2, 5, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)), "bmacha2015@gmail.com" }
+                    { 1, new DateTimeOffset(new DateTime(2026, 7, 8, 3, 30, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)), "Delivered", "AssignedToRider", "Delivered", "Paid", 1277.00m, new DateTimeOffset(new DateTime(2026, 7, 8, 5, 15, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)), "visitor@example.test" },
+                    { 2, new DateTimeOffset(new DateTime(2026, 7, 9, 1, 45, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)), "WaitingForRider", "Packing", "Preparing", "Paid", 1398.00m, new DateTimeOffset(new DateTime(2026, 7, 9, 2, 5, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)), "visitor@example.test" }
                 });
 
             migrationBuilder.InsertData(
@@ -155,8 +155,8 @@ namespace NSA.Persistence.Migrations
                 columns: new[] { "Id", "CreatedAtUtc", "ProductId", "Quantity", "UpdatedAtUtc", "VisitorEmail" },
                 values: new object[,]
                 {
-                    { 1, new DateTimeOffset(new DateTime(2026, 7, 9, 2, 10, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)), 1, 2, new DateTimeOffset(new DateTime(2026, 7, 9, 2, 10, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)), "bmacha2015@gmail.com" },
-                    { 2, new DateTimeOffset(new DateTime(2026, 7, 9, 2, 12, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)), 4, 1, new DateTimeOffset(new DateTime(2026, 7, 9, 2, 12, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)), "bmacha2015@gmail.com" }
+                    { 1, new DateTimeOffset(new DateTime(2026, 7, 9, 2, 10, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)), 1, 2, new DateTimeOffset(new DateTime(2026, 7, 9, 2, 10, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)), "visitor@example.test" },
+                    { 2, new DateTimeOffset(new DateTime(2026, 7, 9, 2, 12, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)), 4, 1, new DateTimeOffset(new DateTime(2026, 7, 9, 2, 12, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)), "visitor@example.test" }
                 });
 
             migrationBuilder.InsertData(
@@ -164,11 +164,11 @@ namespace NSA.Persistence.Migrations
                 columns: new[] { "Id", "Body", "Channel", "CreatedAtUtc", "IsRead", "OrderId", "RecipientEmail", "SentAtUtc", "Subject" },
                 values: new object[,]
                 {
-                    { 1, "Order #1 for bmacha2015@gmail.com. Status: Delivered; Payment: Paid; Fulfillment: AssignedToRider; Delivery: Delivered. Total: PHP 1277.00.", "Email", new DateTimeOffset(new DateTime(2026, 7, 8, 3, 31, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)), true, 1, "bmacha2026@gmail.com", new DateTimeOffset(new DateTime(2026, 7, 8, 3, 31, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)), "New order #1" },
-                    { 2, "Your order #1 was received and is now delivered. Total: PHP 1277.00.", "Email", new DateTimeOffset(new DateTime(2026, 7, 8, 3, 32, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)), true, 1, "bmacha2015@gmail.com", new DateTimeOffset(new DateTime(2026, 7, 8, 3, 32, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)), "Order #1 received" },
-                    { 3, "Order #1 is delivered. Thank you for your purchase.", "Email", new DateTimeOffset(new DateTime(2026, 7, 8, 5, 15, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)), false, 1, "bmacha2015@gmail.com", new DateTimeOffset(new DateTime(2026, 7, 8, 5, 15, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)), "Order #1 status updated" },
-                    { 4, "Order #2 for bmacha2015@gmail.com. Status: Preparing; Payment: Paid; Fulfillment: Packing; Delivery: WaitingForRider. Total: PHP 1398.00.", "Email", new DateTimeOffset(new DateTime(2026, 7, 9, 1, 46, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)), false, 2, "bmacha2026@gmail.com", new DateTimeOffset(new DateTime(2026, 7, 9, 1, 46, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)), "New order #2" },
-                    { 5, "Your order #2 was received and is being prepared. Total: PHP 1398.00.", "Email", new DateTimeOffset(new DateTime(2026, 7, 9, 1, 47, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)), false, 2, "bmacha2015@gmail.com", new DateTimeOffset(new DateTime(2026, 7, 9, 1, 47, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)), "Order #2 received" }
+                    { 1, "Order #1 for visitor@example.test. Status: Delivered; Payment: Paid; Fulfillment: AssignedToRider; Delivery: Delivered. Total: PHP 1277.00.", "Email", new DateTimeOffset(new DateTime(2026, 7, 8, 3, 31, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)), true, 1, "admin@example.test", new DateTimeOffset(new DateTime(2026, 7, 8, 3, 31, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)), "New order #1" },
+                    { 2, "Your order #1 was received and is now delivered. Total: PHP 1277.00.", "Email", new DateTimeOffset(new DateTime(2026, 7, 8, 3, 32, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)), true, 1, "visitor@example.test", new DateTimeOffset(new DateTime(2026, 7, 8, 3, 32, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)), "Order #1 received" },
+                    { 3, "Order #1 is delivered. Thank you for your purchase.", "Email", new DateTimeOffset(new DateTime(2026, 7, 8, 5, 15, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)), false, 1, "visitor@example.test", new DateTimeOffset(new DateTime(2026, 7, 8, 5, 15, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)), "Order #1 status updated" },
+                    { 4, "Order #2 for visitor@example.test. Status: Preparing; Payment: Paid; Fulfillment: Packing; Delivery: WaitingForRider. Total: PHP 1398.00.", "Email", new DateTimeOffset(new DateTime(2026, 7, 9, 1, 46, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)), false, 2, "admin@example.test", new DateTimeOffset(new DateTime(2026, 7, 9, 1, 46, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)), "New order #2" },
+                    { 5, "Your order #2 was received and is being prepared. Total: PHP 1398.00.", "Email", new DateTimeOffset(new DateTime(2026, 7, 9, 1, 47, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)), false, 2, "visitor@example.test", new DateTimeOffset(new DateTime(2026, 7, 9, 1, 47, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)), "Order #2 received" }
                 });
 
             migrationBuilder.InsertData(

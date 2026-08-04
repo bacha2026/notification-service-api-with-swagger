@@ -1,4 +1,6 @@
-# Week 2 bulk-job lifecycle evidence
+# Historical Week 2 bulk-job lifecycle evidence
+
+> This record captures the former in-process `BackgroundService` stage. ADR 004 and the Week 3 evidence supersede its in-memory queue and `Cancelled` shutdown semantics with SQL-backed job state, RabbitMQ redelivery, and a separate WorkerService. The public `202 Accepted` plus status-location contract remains current.
 
 ## Contract confirmed
 

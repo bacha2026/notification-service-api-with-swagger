@@ -68,7 +68,7 @@ public sealed class OrderService(
         return ToDto(order);
     }
 
-    private string AdminEmail => configuration["NotificationEmails:AdminEmail"] ?? "bmacha2026@gmail.com";
+    private string AdminEmail => configuration["NotificationEmails:AdminEmail"] ?? "admin@example.test";
 
     private async Task CreateEmailNotificationSafelyAsync(
         string recipientEmail,
@@ -100,7 +100,7 @@ public sealed class OrderService(
     private string ResolveVisitorEmail(string visitorEmail)
     {
         return string.IsNullOrWhiteSpace(visitorEmail)
-            ? configuration["NotificationEmails:DefaultVisitorEmail"] ?? "bmacha2015@gmail.com"
+            ? configuration["NotificationEmails:DefaultVisitorEmail"] ?? "visitor@example.test"
             : visitorEmail.Trim();
     }
 

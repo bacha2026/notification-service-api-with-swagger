@@ -1,218 +1,148 @@
-using System.Collections.Concurrent;
-using System.Threading.Channels;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using NSA.Application.Abstractions;
 using NSA.Application.Contracts;
 using NSA.Application.Exceptions;
+using NSA.Domain.Entities;
+using NSA.Persistence;
 
 namespace NSA.Service;
 
-public sealed class BulkNotificationJobService : IBulkNotificationJobService
+public sealed class BulkNotificationJobService(
+    NotificationDbContext dbContext,
+    IBulkNotificationCommandPublisher publisher,
+    IOptions<BulkNotificationOptions> options,
+    TimeProvider timeProvider,
+    ILogger<BulkNotificationJobService> logger) : IBulkNotificationJobService
 {
-    private readonly ConcurrentDictionary<Guid, BulkNotificationJob> jobs = new();
-    private readonly object jobsSync = new();
-    private readonly Channel<BulkNotificationJob> queue;
-    private readonly BulkNotificationOptions options;
-    private readonly TimeProvider timeProvider;
-
-    public BulkNotificationJobService()
-        : this(Options.Create(new BulkNotificationOptions()), TimeProvider.System)
-    {
-    }
-
-    public BulkNotificationJobService(IOptions<BulkNotificationOptions> options)
-        : this(options, TimeProvider.System)
-    {
-    }
-
-    public BulkNotificationJobService(IOptions<BulkNotificationOptions> options, TimeProvider timeProvider)
-    {
-        this.options = options.Value;
-        this.timeProvider = timeProvider;
-        queue = Channel.CreateBounded<BulkNotificationJob>(new BoundedChannelOptions(this.options.QueueCapacity)
-        {
-            FullMode = BoundedChannelFullMode.Wait,
-            SingleReader = true,
-            SingleWriter = false
-        });
-    }
-
-    public BulkNotificationJobDto Queue(CreateBulkNotificationsRequest request)
+    public async Task<BulkNotificationJobDto> QueueAsync(
+        CreateBulkNotificationsRequest request,
+        string correlationId,
+        CancellationToken cancellationToken)
     {
         if (request.Notifications is null || request.Notifications.Count == 0)
         {
             throw new RequestValidationException("At least one notification is required.");
         }
 
-        if (request.Notifications.Count > options.MaxBatchSize)
+        if (request.Notifications.Count > options.Value.MaxBatchSize)
         {
-            throw new RequestValidationException($"A bulk notification job cannot contain more than {options.MaxBatchSize} notifications.");
+            throw new RequestValidationException(
+                $"A bulk notification job cannot contain more than {options.Value.MaxBatchSize} notifications.");
         }
 
-        var job = new BulkNotificationJob(Guid.NewGuid(), request.Notifications.ToArray(), timeProvider.GetUtcNow(), timeProvider);
-        lock (jobsSync)
+        await RemoveExpiredJobsAsync(cancellationToken);
+        var activeJobCount = await dbContext.BulkNotificationJobs
+            .CountAsync(job => !BulkNotificationJobStatuses.Terminal.Contains(job.Status), cancellationToken);
+        if (activeJobCount >= options.Value.MaxTrackedJobs)
         {
-            RemoveExpiredJobs();
+            throw new ServiceUnavailableException("The bulk notification service is at capacity. Try again later.");
+        }
 
-            if (jobs.Count >= options.MaxTrackedJobs)
+        var now = timeProvider.GetUtcNow();
+        var jobId = Guid.NewGuid();
+        var normalizedCorrelationId = string.IsNullOrWhiteSpace(correlationId)
+            ? jobId.ToString("N")
+            : correlationId.Trim()[..Math.Min(correlationId.Trim().Length, 128)];
+        var job = new BulkNotificationJob
+        {
+            Id = jobId,
+            Status = BulkNotificationJobStatuses.Queued,
+            MessageSchemaVersion = BulkNotificationRequestedV1.CurrentSchemaVersion,
+            CorrelationId = normalizedCorrelationId,
+            TotalCount = request.Notifications.Count,
+            QueuedAtUtc = now,
+            Items = request.Notifications.Select((item, index) => new BulkNotificationJobItem
             {
-                throw new ServiceUnavailableException("The bulk notification service is at capacity. Try again later.");
+                Sequence = index,
+                RecipientEmail = item.RecipientEmail.Trim(),
+                Channel = item.Channel,
+                Subject = item.Subject.Trim(),
+                Body = item.Body.Trim(),
+                OrderId = item.OrderId,
+                Status = BulkNotificationItemStatuses.Pending
+            }).ToList()
+        };
+
+        dbContext.BulkNotificationJobs.Add(job);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        var command = new BulkNotificationRequestedV1(
+            BulkNotificationRequestedV1.CurrentSchemaVersion,
+            Guid.NewGuid(),
+            job.Id,
+            job.CorrelationId,
+            now);
+
+        try
+        {
+            await publisher.PublishAsync(command, cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            job.Status = BulkNotificationJobStatuses.PublishFailed;
+            job.CompletedAtUtc = timeProvider.GetUtcNow();
+            job.Error = "The persisted job could not be published to the message broker.";
+
+            try
+            {
+                await dbContext.SaveChangesAsync(CancellationToken.None);
+            }
+            catch (Exception statusException)
+            {
+                logger.LogError(
+                    statusException,
+                    "Bulk notification job {JobId} publish failure could not be recorded. CorrelationId: {CorrelationId}",
+                    job.Id,
+                    job.CorrelationId);
             }
 
-            if (!jobs.TryAdd(job.Id, job))
-            {
-                throw new ServiceUnavailableException("The bulk notification job could not be registered. Try again later.");
-            }
-
-            if (!queue.Writer.TryWrite(job))
-            {
-                jobs.TryRemove(job.Id, out _);
-                throw new ServiceUnavailableException("The bulk notification queue is full. Try again later.");
-            }
+            logger.LogError(
+                exception,
+                "Bulk notification job {JobId} could not be published. CorrelationId: {CorrelationId}",
+                job.Id,
+                job.CorrelationId);
+            throw new ServiceUnavailableException("The bulk notification broker is unavailable. Try again later.");
         }
 
-        return job.ToDto();
+        return ToDto(job);
     }
 
-    public BulkNotificationJobDto? GetStatus(Guid jobId)
+    public async Task<BulkNotificationJobDto?> GetStatusAsync(Guid jobId, CancellationToken cancellationToken)
     {
-        BulkNotificationJob? job;
-        lock (jobsSync)
+        await RemoveExpiredJobsAsync(cancellationToken);
+        var job = await dbContext.BulkNotificationJobs
+            .AsNoTracking()
+            .SingleOrDefaultAsync(candidate => candidate.Id == jobId, cancellationToken);
+        return job is null ? null : ToDto(job);
+    }
+
+    private async Task RemoveExpiredJobsAsync(CancellationToken cancellationToken)
+    {
+        var cutoff = timeProvider.GetUtcNow().AddMinutes(-options.Value.CompletedJobRetentionMinutes);
+        var expired = await dbContext.BulkNotificationJobs
+            .Where(job => job.CompletedAtUtc != null && job.CompletedAtUtc < cutoff)
+            .ToListAsync(cancellationToken);
+        if (expired.Count == 0)
         {
-            RemoveExpiredJobs();
-            jobs.TryGetValue(jobId, out job);
+            return;
         }
 
-        return job?.ToDto();
+        dbContext.BulkNotificationJobs.RemoveRange(expired);
+        await dbContext.SaveChangesAsync(cancellationToken);
     }
 
-    public IAsyncEnumerable<BulkNotificationJob> ReadAllAsync(CancellationToken cancellationToken) => queue.Reader.ReadAllAsync(cancellationToken);
-
-    private void RemoveExpiredJobs()
-    {
-        var cutoff = timeProvider.GetUtcNow().AddMinutes(-options.CompletedJobRetentionMinutes);
-        foreach (var (jobId, job) in jobs)
-        {
-            if (job.CompletedBefore(cutoff))
-            {
-                jobs.TryRemove(jobId, out _);
-            }
-        }
-    }
-}
-
-public sealed class BulkNotificationJob
-{
-    private readonly object sync = new();
-    private readonly TimeProvider timeProvider;
-    private readonly int totalCount;
-    private IReadOnlyList<BulkNotificationItemRequest> notifications;
-
-    public BulkNotificationJob(Guid id, IReadOnlyList<BulkNotificationItemRequest> notifications, DateTimeOffset queuedAtUtc)
-        : this(id, notifications, queuedAtUtc, TimeProvider.System)
-    {
-    }
-
-    public BulkNotificationJob(
-        Guid id,
-        IReadOnlyList<BulkNotificationItemRequest> notifications,
-        DateTimeOffset queuedAtUtc,
-        TimeProvider timeProvider)
-    {
-        Id = id;
-        this.notifications = notifications;
-        totalCount = notifications.Count;
-        QueuedAtUtc = queuedAtUtc;
-        this.timeProvider = timeProvider;
-    }
-
-    public Guid Id { get; }
-    public IReadOnlyList<BulkNotificationItemRequest> Notifications
-    {
-        get
-        {
-            lock (sync)
-            {
-                return notifications;
-            }
-        }
-    }
-
-    public DateTimeOffset QueuedAtUtc { get; }
-    public DateTimeOffset? StartedAtUtc { get; private set; }
-    public DateTimeOffset? CompletedAtUtc { get; private set; }
-    public int ProcessedCount { get; private set; }
-    public int SucceededCount { get; private set; }
-    public int FailedCount { get; private set; }
-    public string Status { get; private set; } = "Queued";
-    public string? Error { get; private set; }
-
-    public void Start()
-    {
-        lock (sync)
-        {
-            Status = "Processing";
-            StartedAtUtc = timeProvider.GetUtcNow();
-        }
-    }
-
-    public void RecordSuccess()
-    {
-        lock (sync)
-        {
-            ProcessedCount++;
-            SucceededCount++;
-        }
-    }
-
-    public void RecordFailure(Exception exception)
-    {
-        lock (sync)
-        {
-            ProcessedCount++;
-            FailedCount++;
-            Error ??= "One or more notifications could not be processed.";
-        }
-    }
-
-    public void Cancel()
-    {
-        lock (sync)
-        {
-            Status = "Cancelled";
-            CompletedAtUtc = timeProvider.GetUtcNow();
-            ReleasePayload();
-        }
-    }
-
-    public void Complete()
-    {
-        lock (sync)
-        {
-            Status = FailedCount == 0 ? "Completed" : "CompletedWithErrors";
-            CompletedAtUtc = timeProvider.GetUtcNow();
-            ReleasePayload();
-        }
-    }
-
-    public BulkNotificationJobDto ToDto()
-    {
-        lock (sync)
-        {
-            return new BulkNotificationJobDto(Id, Status, totalCount, ProcessedCount, SucceededCount, FailedCount, QueuedAtUtc, StartedAtUtc, CompletedAtUtc, Error);
-        }
-    }
-
-    public bool CompletedBefore(DateTimeOffset cutoff)
-    {
-        lock (sync)
-        {
-            return CompletedAtUtc is not null && CompletedAtUtc < cutoff;
-        }
-    }
-
-    private void ReleasePayload()
-    {
-        notifications = Array.Empty<BulkNotificationItemRequest>();
-    }
+    internal static BulkNotificationJobDto ToDto(BulkNotificationJob job) =>
+        new(
+            job.Id,
+            job.Status,
+            job.TotalCount,
+            job.ProcessedCount,
+            job.SucceededCount,
+            job.FailedCount,
+            job.QueuedAtUtc,
+            job.StartedAtUtc,
+            job.CompletedAtUtc,
+            job.Error,
+            job.CorrelationId);
 }

@@ -1,19 +1,19 @@
 <mxfile host="app.diagrams.net" agent="Codex" pages="2">
-  <diagram id="system-architecture" name="System Architecture">
+  <diagram id="system-architecture" name="Historical Week 1-2 Application Architecture">
     <mxGraphModel dx="975" dy="536" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1120" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
-        <mxCell id="title" parent="1" style="text;html=1;strokeColor=none;fillColor=none;fontSize=26;fontStyle=1;fontColor=#173F4A;align=center;verticalAlign=middle;" value="Notification Service API - Clean Architecture Overview" vertex="1">
+        <mxCell id="title" parent="1" style="text;html=1;strokeColor=none;fillColor=none;fontSize=26;fontStyle=1;fontColor=#173F4A;align=center;verticalAlign=middle;" value="Notification Service API - Historical Week 1-2 Architecture" vertex="1">
           <mxGeometry height="40" width="1100" x="250" y="20" as="geometry" />
         </mxCell>
         <mxCell id="actorsBoundary" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;fontSize=16;verticalAlign=top;spacingTop=12;" value="API Consumers" vertex="1">
           <mxGeometry height="560" width="240" x="40" y="110" as="geometry" />
         </mxCell>
-        <mxCell id="visitor" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontSize=13;" value="Visitor / Customer&lt;br&gt;bmacha2015@gmail.com" vertex="1">
+        <mxCell id="visitor" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontSize=13;" value="Visitor / Customer&lt;br&gt;visitor@example.test" vertex="1">
           <mxGeometry height="70" width="170" x="75" y="180" as="geometry" />
         </mxCell>
-        <mxCell id="admin" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontSize=13;" value="Admin&lt;br&gt;bmacha2026@gmail.com" vertex="1">
+        <mxCell id="admin" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontSize=13;" value="Admin&lt;br&gt;admin@example.test" vertex="1">
           <mxGeometry height="70" width="170" x="75" y="280" as="geometry" />
         </mxCell>
         <mxCell id="swaggerClient" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=13;" value="Swagger UI&lt;br&gt;/swagger&lt;br&gt;separate OpenAPI v1 + v2" vertex="1">
@@ -106,7 +106,7 @@
         <mxCell id="emailSink" parent="1" style="shape=message;whiteSpace=wrap;html=1;outlineConnect=0;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=12;" value="Application Logs&lt;br&gt;policy transitions + safe state&lt;br&gt;no recipient, subject, or body" vertex="1">
           <mxGeometry height="105" width="250" x="1210" y="540" as="geometry" />
         </mxCell>
-        <mxCell id="flowNote" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=13;align=left;spacingLeft=10;" value="Primary runtime flow:&lt;br&gt;1. URL versioning selects v1/v2; v1 emits Deprecation + Sunset&lt;br&gt;2. Swagger publishes concrete versioned contracts&lt;br&gt;3. Controllers delegate to services; all errors use Problem Details&lt;br&gt;4. Repositories query/save through NotificationDbContext&lt;br&gt;5. Bulk admission is atomic/bounded; terminal jobs release payloads&lt;br&gt;6. BulkNotificationWorker processes jobs through scoped services&lt;br&gt;7. Disabled email returns NotAttempted and leaves the persisted intent pending" vertex="1">
+        <mxCell id="flowNote" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=13;align=left;spacingLeft=10;" value="Historical Week 1-2 runtime flow (superseded for bulk processing by ADR 004):&lt;br&gt;1. URL versioning selects v1/v2; v1 emits Deprecation + Sunset&lt;br&gt;2. Swagger publishes concrete versioned contracts&lt;br&gt;3. Controllers delegate to services; all errors use Problem Details&lt;br&gt;4. Repositories query/save through NotificationDbContext&lt;br&gt;5. Week 2 bulk admission used a bounded in-memory queue&lt;br&gt;6. Week 2 BulkNotificationWorker processed jobs in-process&lt;br&gt;7. Week 3 replaces items 5-6 with SQL-backed jobs, RabbitMQ, and a separate WorkerService" vertex="1">
           <mxGeometry height="120" width="690" x="370" y="960" as="geometry" />
         </mxCell>
         <mxCell id="edgeVisitorSwagger" edge="1" parent="1" source="visitor" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#6c8ebf;endArrow=block;endFill=1;fontSize=11;" target="swaggerClient" value="explores API">
@@ -303,6 +303,65 @@
         <mxCell id="ne3" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#b85450;" edge="1" parent="1" source="notificationRecordEvent" target="emailEvent">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram id="realtime-order-tracking" name="Real-Time Tracking Architecture">
+    <mxGraphModel dx="1600" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="900" math="0" shadow="0">
+      <root>
+        <mxCell id="rt-0" />
+        <mxCell id="rt-1" parent="rt-0" />
+        <mxCell id="rt-title" value="Real-Time Order Tracking - Event-Driven Target Architecture" style="text;html=1;strokeColor=none;fillColor=none;fontSize=26;fontStyle=1;fontColor=#173F4A;align=center;verticalAlign=middle;" vertex="1" parent="rt-1">
+          <mxGeometry x="250" y="20" width="1100" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="rt-customer" value="Customer app&lt;br&gt;HTTPS + SignalR/WebSocket" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=13;" vertex="1" parent="rt-1">
+          <mxGeometry x="40" y="135" width="190" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="rt-operator" value="Courier / operator app&lt;br&gt;authorized status updates" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=13;" vertex="1" parent="rt-1">
+          <mxGeometry x="40" y="260" width="190" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="rt-edge" value="Load balancer / API gateway&lt;br&gt;TLS, authentication, rate limit" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=13;" vertex="1" parent="rt-1">
+          <mxGeometry x="285" y="190" width="220" height="85" as="geometry" />
+        </mxCell>
+        <mxCell id="rt-api" value="Order Tracking API&lt;br&gt;commands + snapshot/replay queries&lt;br&gt;optimistic version checks" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=13;" vertex="1" parent="rt-1">
+          <mxGeometry x="570" y="105" width="240" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="rt-realtime" value="Real-time gateway&lt;br&gt;authorized order subscriptions&lt;br&gt;stateless reconnect/resume" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=13;" vertex="1" parent="rt-1">
+          <mxGeometry x="570" y="265" width="240" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="rt-sql" value="SQL Server - source of truth&lt;br&gt;Orders + ordered status history&lt;br&gt;Outbox in the same transaction" style="shape=cylinder3d;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=13;" vertex="1" parent="rt-1">
+          <mxGeometry x="885" y="85" width="230" height="115" as="geometry" />
+        </mxCell>
+        <mxCell id="rt-redis" value="Read model / cache&lt;br&gt;latest snapshot + sequence&lt;br&gt;bounded retention" style="shape=cylinder3d;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=13;" vertex="1" parent="rt-1">
+          <mxGeometry x="885" y="285" width="230" height="105" as="geometry" />
+        </mxCell>
+        <mxCell id="rt-relay" value="Outbox relay&lt;br&gt;lease + confirmed publish&lt;br&gt;retry without lost events" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=13;" vertex="1" parent="rt-1">
+          <mxGeometry x="1180" y="75" width="210" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="rt-broker" value="RabbitMQ&lt;br&gt;durable versioned events&lt;br&gt;orderId routing + DLQ" style="shape=hexagon;perimeter=hexagonPerimeter2;whiteSpace=wrap;html=1;fixedSize=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=13;" vertex="1" parent="rt-1">
+          <mxGeometry x="1180" y="210" width="210" height="95" as="geometry" />
+        </mxCell>
+        <mxCell id="rt-projection" value="Projection / Inbox consumer&lt;br&gt;dedupe by messageId&lt;br&gt;apply only next order sequence" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=13;" vertex="1" parent="rt-1">
+          <mxGeometry x="1180" y="360" width="210" height="95" as="geometry" />
+        </mxCell>
+        <mxCell id="rt-notify" value="Notification worker&lt;br&gt;email/push adapter boundary&lt;br&gt;idempotent side effects" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=13;" vertex="1" parent="rt-1">
+          <mxGeometry x="1180" y="500" width="210" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="rt-contract" value="Correctness and recovery contract&lt;br&gt;&lt;br&gt;Stable eventId, messageId, orderId, correlationId, schemaVersion, and per-order sequence. At-least-once delivery is expected; Outbox prevents accepted-event loss and Inbox/deduplication prevents repeated state transitions. Clients reconnect with last-seen sequence, fetch a snapshot, then resume. Authorization is checked for every subscription. Expand/contract database changes keep blue and green versions compatible." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=13;align=left;verticalAlign=top;spacing=14;" vertex="1" parent="rt-1">
+          <mxGeometry x="120" y="650" width="1360" height="150" as="geometry" />
+        </mxCell>
+        <mxCell id="rt-e1" value="HTTPS" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;" edge="1" parent="rt-1" source="rt-customer" target="rt-edge"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="rt-e2" value="HTTPS" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;" edge="1" parent="rt-1" source="rt-operator" target="rt-edge"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="rt-e3" value="commands / snapshots" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;" edge="1" parent="rt-1" source="rt-edge" target="rt-api"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="rt-e4" value="negotiate / subscribe" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;" edge="1" parent="rt-1" source="rt-edge" target="rt-realtime"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="rt-e5" value="atomic order + event + Outbox" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#82b366;" edge="1" parent="rt-1" source="rt-api" target="rt-sql"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="rt-e6" value="lease unpublished" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#d6b656;" edge="1" parent="rt-1" source="rt-sql" target="rt-relay"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="rt-e7" value="publisher confirm" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#b85450;" edge="1" parent="rt-1" source="rt-relay" target="rt-broker"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="rt-e8" value="ordered event" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#82b366;" edge="1" parent="rt-1" source="rt-broker" target="rt-projection"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="rt-e9" value="snapshot + sequence" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#82b366;" edge="1" parent="rt-1" source="rt-projection" target="rt-redis"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="rt-e10" value="resume snapshot" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#9673a6;" edge="1" parent="rt-1" source="rt-redis" target="rt-realtime"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="rt-e11" value="live event" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#9673a6;" edge="1" parent="rt-1" source="rt-broker" target="rt-realtime"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="rt-e12" value="notification event" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#9673a6;" edge="1" parent="rt-1" source="rt-broker" target="rt-notify"><mxGeometry relative="1" as="geometry" /></mxCell>
       </root>
     </mxGraphModel>
   </diagram>

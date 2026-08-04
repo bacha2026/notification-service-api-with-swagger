@@ -11,6 +11,8 @@ public sealed class NotificationDbContext(DbContextOptions<NotificationDbContext
     public DbSet<Order> Orders => Set<Order>();
     public DbSet<OrderItem> OrderItems => Set<OrderItem>();
     public DbSet<Notification> Notifications => Set<Notification>();
+    public DbSet<BulkNotificationJob> BulkNotificationJobs => Set<BulkNotificationJob>();
+    public DbSet<BulkNotificationJobItem> BulkNotificationJobItems => Set<BulkNotificationJobItem>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -35,8 +37,8 @@ public sealed class NotificationDbContext(DbContextOptions<NotificationDbContext
             entity.HasOne(x => x.Product).WithMany().HasForeignKey(x => x.ProductId);
             entity.HasIndex(x => new { x.VisitorEmail, x.ProductId }).IsUnique();
             entity.HasData(
-                new CartItem { Id = 1, VisitorEmail = "bmacha2015@gmail.com", ProductId = 1, Quantity = 2, CreatedAtUtc = new DateTimeOffset(2026, 7, 9, 2, 10, 0, TimeSpan.Zero), UpdatedAtUtc = new DateTimeOffset(2026, 7, 9, 2, 10, 0, TimeSpan.Zero) },
-                new CartItem { Id = 2, VisitorEmail = "bmacha2015@gmail.com", ProductId = 4, Quantity = 1, CreatedAtUtc = new DateTimeOffset(2026, 7, 9, 2, 12, 0, TimeSpan.Zero), UpdatedAtUtc = new DateTimeOffset(2026, 7, 9, 2, 12, 0, TimeSpan.Zero) });
+                new CartItem { Id = 1, VisitorEmail = "visitor@example.test", ProductId = 1, Quantity = 2, CreatedAtUtc = new DateTimeOffset(2026, 7, 9, 2, 10, 0, TimeSpan.Zero), UpdatedAtUtc = new DateTimeOffset(2026, 7, 9, 2, 10, 0, TimeSpan.Zero) },
+                new CartItem { Id = 2, VisitorEmail = "visitor@example.test", ProductId = 4, Quantity = 1, CreatedAtUtc = new DateTimeOffset(2026, 7, 9, 2, 12, 0, TimeSpan.Zero), UpdatedAtUtc = new DateTimeOffset(2026, 7, 9, 2, 12, 0, TimeSpan.Zero) });
         });
 
         modelBuilder.Entity<Order>(entity =>
@@ -49,8 +51,8 @@ public sealed class NotificationDbContext(DbContextOptions<NotificationDbContext
             entity.Property(x => x.DeliveryStatus).HasConversion<string>().HasMaxLength(40);
             entity.HasMany(x => x.Items).WithOne(x => x.Order).HasForeignKey(x => x.OrderId);
             entity.HasData(
-                new Order { Id = 1, VisitorEmail = "bmacha2015@gmail.com", OrderStatus = OrderStatus.Delivered, PaymentStatus = PaymentStatus.Paid, FulfillmentStatus = FulfillmentStatus.AssignedToRider, DeliveryStatus = DeliveryStatus.Delivered, TotalAmount = 1277.00m, CreatedAtUtc = new DateTimeOffset(2026, 7, 8, 3, 30, 0, TimeSpan.Zero), UpdatedAtUtc = new DateTimeOffset(2026, 7, 8, 5, 15, 0, TimeSpan.Zero) },
-                new Order { Id = 2, VisitorEmail = "bmacha2015@gmail.com", OrderStatus = OrderStatus.Preparing, PaymentStatus = PaymentStatus.Paid, FulfillmentStatus = FulfillmentStatus.Packing, DeliveryStatus = DeliveryStatus.WaitingForRider, TotalAmount = 1398.00m, CreatedAtUtc = new DateTimeOffset(2026, 7, 9, 1, 45, 0, TimeSpan.Zero), UpdatedAtUtc = new DateTimeOffset(2026, 7, 9, 2, 5, 0, TimeSpan.Zero) });
+                new Order { Id = 1, VisitorEmail = "visitor@example.test", OrderStatus = OrderStatus.Delivered, PaymentStatus = PaymentStatus.Paid, FulfillmentStatus = FulfillmentStatus.AssignedToRider, DeliveryStatus = DeliveryStatus.Delivered, TotalAmount = 1277.00m, CreatedAtUtc = new DateTimeOffset(2026, 7, 8, 3, 30, 0, TimeSpan.Zero), UpdatedAtUtc = new DateTimeOffset(2026, 7, 8, 5, 15, 0, TimeSpan.Zero) },
+                new Order { Id = 2, VisitorEmail = "visitor@example.test", OrderStatus = OrderStatus.Preparing, PaymentStatus = PaymentStatus.Paid, FulfillmentStatus = FulfillmentStatus.Packing, DeliveryStatus = DeliveryStatus.WaitingForRider, TotalAmount = 1398.00m, CreatedAtUtc = new DateTimeOffset(2026, 7, 9, 1, 45, 0, TimeSpan.Zero), UpdatedAtUtc = new DateTimeOffset(2026, 7, 9, 2, 5, 0, TimeSpan.Zero) });
         });
 
         modelBuilder.Entity<OrderItem>(entity =>
@@ -74,11 +76,38 @@ public sealed class NotificationDbContext(DbContextOptions<NotificationDbContext
             entity.Property(x => x.Channel).HasConversion<string>().HasMaxLength(20);
             entity.HasOne(x => x.Order).WithMany().HasForeignKey(x => x.OrderId).OnDelete(DeleteBehavior.SetNull);
             entity.HasData(
-                new Notification { Id = 1, RecipientEmail = "bmacha2026@gmail.com", Channel = NotificationChannel.Email, Subject = "New order #1", Body = "Order #1 for bmacha2015@gmail.com. Status: Delivered; Payment: Paid; Fulfillment: AssignedToRider; Delivery: Delivered. Total: PHP 1277.00.", OrderId = 1, IsRead = true, CreatedAtUtc = new DateTimeOffset(2026, 7, 8, 3, 31, 0, TimeSpan.Zero), SentAtUtc = new DateTimeOffset(2026, 7, 8, 3, 31, 0, TimeSpan.Zero) },
-                new Notification { Id = 2, RecipientEmail = "bmacha2015@gmail.com", Channel = NotificationChannel.Email, Subject = "Order #1 received", Body = "Your order #1 was received and is now delivered. Total: PHP 1277.00.", OrderId = 1, IsRead = true, CreatedAtUtc = new DateTimeOffset(2026, 7, 8, 3, 32, 0, TimeSpan.Zero), SentAtUtc = new DateTimeOffset(2026, 7, 8, 3, 32, 0, TimeSpan.Zero) },
-                new Notification { Id = 3, RecipientEmail = "bmacha2015@gmail.com", Channel = NotificationChannel.Email, Subject = "Order #1 status updated", Body = "Order #1 is delivered. Thank you for your purchase.", OrderId = 1, IsRead = false, CreatedAtUtc = new DateTimeOffset(2026, 7, 8, 5, 15, 0, TimeSpan.Zero), SentAtUtc = new DateTimeOffset(2026, 7, 8, 5, 15, 0, TimeSpan.Zero) },
-                new Notification { Id = 4, RecipientEmail = "bmacha2026@gmail.com", Channel = NotificationChannel.Email, Subject = "New order #2", Body = "Order #2 for bmacha2015@gmail.com. Status: Preparing; Payment: Paid; Fulfillment: Packing; Delivery: WaitingForRider. Total: PHP 1398.00.", OrderId = 2, IsRead = false, CreatedAtUtc = new DateTimeOffset(2026, 7, 9, 1, 46, 0, TimeSpan.Zero), SentAtUtc = new DateTimeOffset(2026, 7, 9, 1, 46, 0, TimeSpan.Zero) },
-                new Notification { Id = 5, RecipientEmail = "bmacha2015@gmail.com", Channel = NotificationChannel.Email, Subject = "Order #2 received", Body = "Your order #2 was received and is being prepared. Total: PHP 1398.00.", OrderId = 2, IsRead = false, CreatedAtUtc = new DateTimeOffset(2026, 7, 9, 1, 47, 0, TimeSpan.Zero), SentAtUtc = new DateTimeOffset(2026, 7, 9, 1, 47, 0, TimeSpan.Zero) });
+                new Notification { Id = 1, RecipientEmail = "admin@example.test", Channel = NotificationChannel.Email, Subject = "New order #1", Body = "Order #1 for visitor@example.test. Status: Delivered; Payment: Paid; Fulfillment: AssignedToRider; Delivery: Delivered. Total: PHP 1277.00.", OrderId = 1, IsRead = true, CreatedAtUtc = new DateTimeOffset(2026, 7, 8, 3, 31, 0, TimeSpan.Zero), SentAtUtc = new DateTimeOffset(2026, 7, 8, 3, 31, 0, TimeSpan.Zero) },
+                new Notification { Id = 2, RecipientEmail = "visitor@example.test", Channel = NotificationChannel.Email, Subject = "Order #1 received", Body = "Your order #1 was received and is now delivered. Total: PHP 1277.00.", OrderId = 1, IsRead = true, CreatedAtUtc = new DateTimeOffset(2026, 7, 8, 3, 32, 0, TimeSpan.Zero), SentAtUtc = new DateTimeOffset(2026, 7, 8, 3, 32, 0, TimeSpan.Zero) },
+                new Notification { Id = 3, RecipientEmail = "visitor@example.test", Channel = NotificationChannel.Email, Subject = "Order #1 status updated", Body = "Order #1 is delivered. Thank you for your purchase.", OrderId = 1, IsRead = false, CreatedAtUtc = new DateTimeOffset(2026, 7, 8, 5, 15, 0, TimeSpan.Zero), SentAtUtc = new DateTimeOffset(2026, 7, 8, 5, 15, 0, TimeSpan.Zero) },
+                new Notification { Id = 4, RecipientEmail = "admin@example.test", Channel = NotificationChannel.Email, Subject = "New order #2", Body = "Order #2 for visitor@example.test. Status: Preparing; Payment: Paid; Fulfillment: Packing; Delivery: WaitingForRider. Total: PHP 1398.00.", OrderId = 2, IsRead = false, CreatedAtUtc = new DateTimeOffset(2026, 7, 9, 1, 46, 0, TimeSpan.Zero), SentAtUtc = new DateTimeOffset(2026, 7, 9, 1, 46, 0, TimeSpan.Zero) },
+                new Notification { Id = 5, RecipientEmail = "visitor@example.test", Channel = NotificationChannel.Email, Subject = "Order #2 received", Body = "Your order #2 was received and is being prepared. Total: PHP 1398.00.", OrderId = 2, IsRead = false, CreatedAtUtc = new DateTimeOffset(2026, 7, 9, 1, 47, 0, TimeSpan.Zero), SentAtUtc = new DateTimeOffset(2026, 7, 9, 1, 47, 0, TimeSpan.Zero) });
+        });
+
+        modelBuilder.Entity<BulkNotificationJob>(entity =>
+        {
+            entity.Property(x => x.Status)
+                .HasMaxLength(40)
+                .IsRequired()
+                .IsConcurrencyToken();
+            entity.Property(x => x.CorrelationId).HasMaxLength(128).IsRequired();
+            entity.Property(x => x.Error).HasMaxLength(1000);
+            entity.HasIndex(x => x.Status);
+            entity.HasIndex(x => x.CompletedAtUtc);
+            entity.HasMany(x => x.Items)
+                .WithOne(x => x.Job)
+                .HasForeignKey(x => x.JobId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<BulkNotificationJobItem>(entity =>
+        {
+            entity.Property(x => x.RecipientEmail).HasMaxLength(320).IsRequired();
+            entity.Property(x => x.Channel).HasConversion<string>().HasMaxLength(20);
+            entity.Property(x => x.Subject).HasMaxLength(200).IsRequired();
+            entity.Property(x => x.Body).HasMaxLength(4000).IsRequired();
+            entity.Property(x => x.Status).HasMaxLength(20).IsRequired();
+            entity.Property(x => x.LastError).HasMaxLength(500);
+            entity.HasIndex(x => new { x.JobId, x.Sequence }).IsUnique();
         });
     }
 }

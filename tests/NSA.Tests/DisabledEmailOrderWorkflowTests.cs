@@ -19,7 +19,7 @@ public sealed class DisabledEmailOrderWorkflowTests : IClassFixture<NsaApiFactor
     [Fact]
     public async Task Order_creation_succeeds_and_leaves_email_intents_pending_when_provider_is_disabled()
     {
-        const string visitorEmail = "bmacha2015@gmail.com";
+        const string visitorEmail = "visitor@example.test";
         using var orderResponse = await client.PostAsJsonAsync("/api/v2/orders", new
         {
             visitorEmail

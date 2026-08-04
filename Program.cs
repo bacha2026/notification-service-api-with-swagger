@@ -2,11 +2,14 @@ using System.Reflection;
 using System.Diagnostics;
 using Asp.Versioning;
 using Microsoft.AspNetCore.Diagnostics;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.OpenApi.Models;
 using NSA.Application.Abstractions;
-using NSA.Infrastructure.BackgroundServices;
 using NSA.Infrastructure.Email;
+using NSA.Infrastructure.Health;
+using NSA.Infrastructure.Messaging;
 using NSA.Persistence;
 using NSA.Persistence.Concrete;
 using NSA.Persistence.Interfaces;
@@ -40,6 +43,21 @@ builder.Services.AddApiVersioning(options =>
         options.SubstituteApiVersionInUrl = true;
     });
 builder.Services.AddEndpointsApiExplorer();
+var healthChecks = builder.Services.AddHealthChecks();
+if (builder.Configuration.GetValue("HealthChecks:DependencyChecksEnabled", true))
+{
+    healthChecks
+        .AddCheck<SqlServerReadinessHealthCheck>(
+            "sql-server",
+            failureStatus: HealthStatus.Unhealthy,
+            tags: ["ready"],
+            timeout: TimeSpan.FromSeconds(3))
+        .AddCheck<RabbitMqReadinessHealthCheck>(
+            "rabbitmq",
+            failureStatus: HealthStatus.Unhealthy,
+            tags: ["ready"],
+            timeout: TimeSpan.FromSeconds(3));
+}
 builder.Services.AddSwaggerGen(options =>
 {
     options.SwaggerDoc("v1", new OpenApiInfo
@@ -111,9 +129,14 @@ builder.Services.AddOptions<BulkNotificationOptions>()
     .ValidateDataAnnotations()
     .ValidateOnStart();
 builder.Services.AddSingleton(TimeProvider.System);
-builder.Services.AddSingleton<BulkNotificationJobService>();
-builder.Services.AddSingleton<IBulkNotificationJobService>(serviceProvider => serviceProvider.GetRequiredService<BulkNotificationJobService>());
-builder.Services.AddHostedService<BulkNotificationWorker>();
+builder.Services.AddOptions<RabbitMqOptions>()
+    .Bind(builder.Configuration.GetSection(RabbitMqOptions.SectionName))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
+builder.Services.AddSingleton<RabbitMqBulkNotificationPublisher>();
+builder.Services.AddSingleton<IBulkNotificationCommandPublisher>(serviceProvider =>
+    serviceProvider.GetRequiredService<RabbitMqBulkNotificationPublisher>());
+builder.Services.AddScoped<IBulkNotificationJobService, BulkNotificationJobService>();
 
 var app = builder.Build();
 
@@ -132,7 +155,10 @@ app.UseSwaggerUI(options =>
     options.RoutePrefix = "swagger";
 });
 
-app.UseHttpsRedirection();
+if (builder.Configuration.GetValue("HttpsRedirection:Enabled", true))
+{
+    app.UseHttpsRedirection();
+}
 app.UseExceptionHandler();
 app.Use(async (context, next) =>
 {
@@ -166,6 +192,14 @@ app.UseStatusCodePages(async statusCodeContext =>
     });
 });
 app.MapControllers();
+app.MapHealthChecks("/health/live", new HealthCheckOptions
+{
+    Predicate = registration => !registration.Tags.Contains("ready")
+}).ExcludeFromDescription();
+app.MapHealthChecks("/health/ready", new HealthCheckOptions
+{
+    Predicate = registration => registration.Tags.Contains("ready")
+}).ExcludeFromDescription();
 app.MapGet("/", () => Results.Redirect("/swagger")).ExcludeFromDescription();
 
 app.Run();

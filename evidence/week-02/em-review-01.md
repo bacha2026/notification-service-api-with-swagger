@@ -16,7 +16,7 @@
 
 ## Prepared local demo evidence
 
-- 72/72 automated tests pass under the pinned .NET 8 SDK.
+- The original Week 2 packet recorded 72/72 tests; the current solution-wide rerun passes 76/76 under the pinned .NET 8 SDK.
 - Both Swagger documents and ten additional live route/error probes pass.
 - v1/v1.0 retirement headers and v2 behavior are demonstrated.
 - Retry, timeout, shared circuit opening/recovery, cancellation, and idempotency-key behavior are deterministic tests.

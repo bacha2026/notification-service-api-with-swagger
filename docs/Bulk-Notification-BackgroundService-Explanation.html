@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Bulk Notification BackgroundService Requirement</title>
+  <title>Historical Week 2 — Bulk Notification BackgroundService Requirement</title>
   <style>
     @page { size: A4; margin: 18mm; }
     body { font-family: "Segoe UI", Arial, sans-serif; color: #1f2937; line-height: 1.55; font-size: 10.5pt; }
@@ -16,6 +16,7 @@
     .path { color: #475569; font-family: Consolas, monospace; font-size: 9pt; overflow-wrap: anywhere; }
     .flow { text-align: center; background: #f8fafc; border: 1px solid #cbd5e1; padding: 4mm; font-family: Consolas, monospace; }
     .note { background: #fff7ed; border-left: 4px solid #f97316; padding: 3mm 4mm; }
+    .superseded { background: #fff7ed; border: 1px solid #fdba74; border-left: 5px solid #ea580c; padding: 4mm; margin: 0 0 5mm; }
     table { width: 100%; border-collapse: collapse; margin: 3mm 0; }
     th, td { border: 1px solid #cbd5e1; padding: 2.5mm; text-align: left; vertical-align: top; }
     th { background: #e2e8f0; }
@@ -23,10 +24,11 @@
   </style>
 </head>
 <body>
-  <h1>Bulk Notification BackgroundService</h1>
+  <h1>Historical Week 2: Bulk Notification BackgroundService</h1>
+  <div class="superseded"><strong>Superseded implementation snapshot.</strong> This document records how the Week 2 in-process <code>BackgroundService</code> requirement was originally met. Week 3 removed the in-memory channel/dictionary and API-hosted worker. The current system persists jobs in SQL Server, publishes through RabbitMQ, and processes them in the separate <code>NSA.Worker</code> executable. See <code>docs/adr/004-rabbitmq-worker-and-dlq.md</code> and <code>evidence/week-03/topology.md</code>. Paths and code excerpts below are historical and must not be used as current run instructions.</div>
   <p><strong>Requirement:</strong> Add a <code>BackgroundService</code>; <code>POST /notifications/bulk</code> returns <code>202 Accepted</code> plus a <code>jobId</code>; a status endpoint reflects progress.</p>
 
-  <div class="summary"><strong>Result:</strong> The requirement is fulfilled. The implementation is split across the controller, in-memory job service, background worker, response DTO, and dependency-injection registration.</div>
+  <div class="summary"><strong>Week 2 result:</strong> At that milestone, the requirement was fulfilled by the controller, in-memory job service, API-hosted background worker, response DTO, and dependency-injection registration. The public 202/status contract remains, but ADR 004 supersedes the internal implementation for Week 3.</div>
 
   <h2>1. POST /notifications/bulk returns 202 and jobId</h2>
   <p class="path">Presentation/Controllers/Notification/NotificationsController.cs — lines 85–103</p>

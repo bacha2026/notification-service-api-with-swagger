@@ -86,14 +86,19 @@ public sealed class NotificationsController(INotificationService notificationSer
     /// <remarks>Send between 1 and 100 notifications in the request body. Processing continues in the background after the endpoint returns; save the returned jobId or Location header and use the bulk status endpoint to monitor progress.</remarks>
     /// <response code="202">The job was accepted. Use the status endpoint and returned job id to monitor it.</response>
     /// <response code="400">The batch is empty, too large, or contains an invalid notification.</response>
-    /// <response code="503">The in-memory queue is temporarily at capacity.</response>
+    /// <response code="503">The job store is at capacity or the broker did not confirm publication.</response>
     [HttpPost("bulk")]
     [ProducesResponseType(typeof(BulkNotificationJobDto), StatusCodes.Status202Accepted)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
-    public ActionResult<BulkNotificationJobDto> CreateBulkNotifications(CreateBulkNotificationsRequest request, [FromServices] IBulkNotificationJobService bulkJobs)
+    public async Task<ActionResult<BulkNotificationJobDto>> CreateBulkNotifications(
+        CreateBulkNotificationsRequest request,
+        [FromServices] IBulkNotificationJobService bulkJobs,
+        CancellationToken cancellationToken)
     {
-        var job = bulkJobs.Queue(request);
+        var correlationId = HttpContext.TraceIdentifier;
+        var job = await bulkJobs.QueueAsync(request, correlationId, cancellationToken);
+        Response.Headers["X-Correlation-ID"] = job.CorrelationId;
         var requestedVersion = HttpContext.GetRequestedApiVersion();
         var statusLocation = requestedVersion is null
             ? $"/api/notifications/bulk/{job.JobId}"
@@ -109,9 +114,12 @@ public sealed class NotificationsController(INotificationService notificationSer
     [HttpGet("bulk/{jobId:guid}")]
     [ProducesResponseType(typeof(BulkNotificationJobDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public ActionResult<BulkNotificationJobDto> GetBulkNotificationStatus(Guid jobId, [FromServices] IBulkNotificationJobService bulkJobs)
+    public async Task<ActionResult<BulkNotificationJobDto>> GetBulkNotificationStatus(
+        Guid jobId,
+        [FromServices] IBulkNotificationJobService bulkJobs,
+        CancellationToken cancellationToken)
     {
-        var job = bulkJobs.GetStatus(jobId);
+        var job = await bulkJobs.GetStatusAsync(jobId, cancellationToken);
         return job is null ? NotFound() : Ok(job);
     }
 }

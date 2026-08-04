@@ -2,6 +2,8 @@
 
 Use this file as the repeatable review record for the Week 1 foundation and Week 2 hardening. Copy it into an evidence branch or review folder, fill every evidence link/result, and leave an unchecked item with an owner rather than treating an unproved claim as complete.
 
+**Historical-stage note:** command timings and the 72-test count below are the original 13 July Week 1–2 capture. The current solution-wide rerun is [76/76 with the API and separate WorkerService](../../evidence/week-03/build-test.txt). Week 3 superseded the in-memory worker and `Cancelled` state described by the historical Week 2 lifecycle; the public 202/status contract remains.
+
 ## Review metadata
 
 | Field | Value |
@@ -61,16 +63,17 @@ dotnet run --launch-profile https
 - [x] Notification create, read, update, and delete smoke scenarios pass.
 - [x] Product, cart, and order supporting scenarios required by the demo pass.
 - [x] Every controller action has an XML summary and each expected success/failure outcome is represented in OpenAPI.
+- [x] Every action-specific `[ProducesResponseType]` status has a paired XML `<response>` description; centralized generic 400/415/500 metadata and RFC 7807 schemas are supplied consistently by `ProblemDetailsOperationFilter` and asserted in the generated documents.
 - [x] `/swagger`, `/swagger/v1/swagger.json`, and `/swagger/v2/swagger.json` load.
 - [x] OpenAPI documents parse successfully and show the intended paths, request/response schemas, versions, and response codes.
 - [x] The README lets a reviewer configure SQL Server, build, run, open Swagger, and run tests without oral instructions.
 
 ### Architecture proof
 
-- [x] [`drawio/notification.drawio`](../../drawio/notification.drawio) matches the implemented request/dependency flow and has current readable exports.
-- [x] Readable runtime export reviewed: [PDF](../architecture/week-02-runtime-architecture.pdf) / [PNG](../architecture/week-02-runtime-architecture.png) / [SVG](../architecture/week-02-runtime-architecture.svg).
+- [x] [`drawio/notification.drawio`](../../drawio/notification.drawio), page **Real-Time Tracking Architecture**, records the required order-tracking design and its Week 3–6 evolution path.
+- [x] Readable real-time design export reviewed: [PDF](../../evidence/week-01/architecture-export.pdf) / [PNG](../architecture/week-01-realtime-order-tracking.png).
 - [ ] The 30-minute order-tracking design exercise date, audience, and notes are recorded: ____________________.
-- [x] The [Week 1 architecture decision](../week-01-architecture-decision.md) covers context, constraints, alternatives, tradeoffs, validation, and evolution triggers.
+- [x] The [Week 1 real-time order-tracking decision](../week-01-realtime-order-tracking-decision.md) covers context, constraints, alternatives, tradeoffs, validation, and evolution triggers.
 
 ## Week 2 acceptance checklist
 
@@ -129,7 +132,8 @@ Use a deterministic fake HTTP handler/server and record the actual policy compos
 - [x] Retry delays and total attempts match ADR 003.
 - [x] Circuit threshold, break duration, policy order, and state transitions are asserted or logged.
 - [x] Outbound calls have a bounded timeout.
-- [ ] The same idempotency key is observed across Polly retries of one send; provider idempotency/deduplication behavior is documented separately: ____________________.
+- [x] The same local idempotency key is observed across Polly retries of one logical send.
+- [ ] The real provider's idempotency/deduplication behavior is documented and approved separately: ____________________.
 - [x] No production enablement is approved while retry safety remains unknown; `Postbound:Enabled` remains `false`.
 
 ### Bulk-job contract and latency
@@ -137,7 +141,7 @@ Use a deterministic fake HTTP handler/server and record the actual policy compos
 - [x] Empty/invalid batches return Problem Details and do not enqueue work.
 - [x] Oversized batches return 400; queue/tracked-job capacity rejection returns retryable 503.
 - [x] A valid request returns `202 Accepted`, a non-empty job ID, and a resolvable status location.
-- [x] Status is observed as `Queued` → `Processing` → `Completed` or `CompletedWithErrors`; graceful shutdown produces `Cancelled` for in-flight work.
+- [x] The historical Week 2 stage observed `Queued` → `Processing` → `Completed`/`CompletedWithErrors`, with `Cancelled` on graceful shutdown. Week 3 supersedes this with SQL-backed `Queued`/`Processing`/`Retrying`/terminal states and broker redelivery rather than a process-local `Cancelled` state.
 - [x] `ProcessedCount = SucceededCount + FailedCount` and never exceeds `TotalCount`.
 - [x] A missing job returns 404 Problem Details.
 - [x] Evidence describes the implemented contract accurately: every item is persisted; email items use `IEmailSender`; other channels have no external adapter; disabled-provider mode makes no network call and leaves email intent pending.
@@ -167,7 +171,7 @@ For each ADR, verify status/date, context, drivers, considered options, selected
 | [ADR 001](../adr/001-url-api-versioning.md) | ☒ | ☐ | Local content gate passed; reviewer pending |
 | [ADR 002](../adr/002-problem-details-errors.md) | ☒ | ☐ | Local content gate passed; reviewer pending |
 | [ADR 003](../adr/003-background-bulk-notifications-and-resilience.md) | ☒ | ☐ | Local content gate passed; real provider contract pending |
-| [Week 1 architecture decision](../week-01-architecture-decision.md) | ☒ | ☐ | Local content gate passed; reviewer pending |
+| [Week 1 real-time order-tracking decision](../week-01-realtime-order-tracking-decision.md) | ☒ | ☐ | Local content gate passed; reviewer pending |
 
 ## EM Code Review #1
 
@@ -188,7 +192,7 @@ For each ADR, verify status/date, context, drivers, considered options, selected
 | Skill IQ baseline | [pending record](../../evidence/week-01/skill-iq-record.md) | Engineer/EM pending |
 | Build/test/start transcript | [build.txt](../../evidence/week-01/build.txt) | Codex local verification / 2026-07-13 |
 | CRUD/OpenAPI smoke proof | [record](../../evidence/week-01/crud-smoke.md) / [screenshot](../../evidence/week-01/swagger.png) | Codex local verification / 2026-07-13 |
-| Architecture source/export/design notes | [source](../../drawio/notification.drawio) / [PDF](../architecture/week-02-runtime-architecture.pdf) / [notes](../../evidence/week-01/demo-notes.md) | Export reviewed; human exercise pending |
+| Architecture source/export/design notes | [source](../../drawio/notification.drawio) / [real-time PDF](../../evidence/week-01/architecture-export.pdf) / [notes](../../evidence/week-01/demo-notes.md) | Export reviewed; human exercise pending |
 | Error matrix | [matrix](../../evidence/week-02/error-matrix.md) | Codex local verification / 2026-07-13 |
 | Versioning checks | [requests](../../evidence/week-02/versioning.http) / [result](../../evidence/week-02/live-contract-smoke.json) | Codex local verification / 2026-07-13 |
 | Polly retry/circuit/timeout transcript | [record](../../evidence/week-02/polly-test.txt) | Automated tests / 2026-07-13 |

@@ -1,0 +1,44 @@
+Week 3 hardened Docker Compose build and healthy-start verification
+Recorded: 2026-07-20 18:08-18:13 Asia/Manila
+Workspace: C:\Users\Full Scale\projects\notification\notification-api
+
+> docker compose -f compose.week3.yml config --quiet
+PASS - required credentials resolved from the ignored local environment; exit code 0
+
+> docker compose -f compose.week3.yml build api worker
+PASS - final Release API and Worker images built; exit code 0
+API image: sha256:1ed8cecd579da8de4574b668b6bbb42e4e24f9b6c6e75e6abce3c1b6864b9813
+Worker image: sha256:ffe9cb388a60bfbbe1c2ec868f1f9369bbe27d1657f9014d26ce197298e42e85
+
+> docker compose -f compose.week3.yml up -d --force-recreate api worker
+PASS - SQL Server, RabbitMQ, API, and Worker reached healthy state; exit code 0
+
+Final state:
+
+SERVICE      IMAGE                                      HEALTHY   HOST EXPOSURE
+api          nsa-week3-api                              yes       127.0.0.1:8080
+rabbitmq     rabbitmq:4.3-management                    yes       127.0.0.1:15672
+sqlserver    mcr.microsoft.com/mssql/server:2022-latest yes       none
+worker       nsa-week3-worker                           yes       none
+
+Named resources:
+volume=nsa-week3-rabbitmq-data-v2
+volume=nsa-week3-sqlserver-data-v2
+network=nsa-week3-network
+
+Runtime gates:
+- GET /health/live = 200
+- GET /health/ready = 200
+- forward migration 20260720180000_RedactTrainingSeedPersonalData applied
+- reserved seed users returned by the live API: visitor@example.test and admin@example.test
+- Week 1-2 HTTP smoke = 12/12
+- final bulk p95 = 19.071 ms over 25 samples after five warmups (<100 ms)
+- RabbitMQ and SQL dependency-loss readiness/recovery proofs passed; see readiness-recovery.md
+- worker failure-injection setting was restored to empty after the poison proof
+- API/worker publish outputs contain no testing/development settings, launch metadata, global SDK file, or evidence JSON
+
+Security/configuration gates:
+- Compose fails closed when required credential variables are absent.
+- Credential values were not committed or printed in this record.
+- The ignored .env is excluded by both Git and the Docker build context.
+- Host-published ports bind to loopback only.

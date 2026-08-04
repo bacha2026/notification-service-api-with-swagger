@@ -29,6 +29,14 @@ public sealed class ApiContractTests : IClassFixture<NsaApiFactory>
 
         using var v1 = JsonDocument.Parse(await v1Response.Content.ReadAsStringAsync());
         using var v2 = JsonDocument.Parse(await v2Response.Content.ReadAsStringAsync());
+        Assert.StartsWith(
+            "3.0.",
+            v1.RootElement.GetProperty("openapi").GetString(),
+            StringComparison.Ordinal);
+        Assert.StartsWith(
+            "3.0.",
+            v2.RootElement.GetProperty("openapi").GetString(),
+            StringComparison.Ordinal);
         var v1Paths = v1.RootElement.GetProperty("paths").EnumerateObject().Select(path => path.Name).ToArray();
         var v2Paths = v2.RootElement.GetProperty("paths").EnumerateObject().Select(path => path.Name).ToArray();
 
@@ -40,6 +48,8 @@ public sealed class ApiContractTests : IClassFixture<NsaApiFactory>
         Assert.Contains(v2Paths, path => path.StartsWith("/api/v2/", StringComparison.Ordinal));
         Assert.DoesNotContain(v1Paths, path => path.StartsWith("/api/v2/", StringComparison.Ordinal));
         Assert.DoesNotContain(v2Paths, path => path.StartsWith("/api/v1/", StringComparison.Ordinal));
+        AssertOpenApiDocumentation(v1.RootElement);
+        AssertOpenApiDocumentation(v2.RootElement);
 
         var getById = v2.RootElement
             .GetProperty("paths")
@@ -115,6 +125,17 @@ public sealed class ApiContractTests : IClassFixture<NsaApiFactory>
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         Assert.False(response.Headers.Contains("Deprecation"));
         Assert.False(response.Headers.Contains("Sunset"));
+    }
+
+    [Theory]
+    [InlineData("/health/live")]
+    [InlineData("/health/ready")]
+    public async Task Health_endpoints_are_available(string path)
+    {
+        using var response = await client.GetAsync(path);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("Healthy", await response.Content.ReadAsStringAsync());
     }
 
     [Theory]
@@ -277,7 +298,7 @@ public sealed class ApiContractTests : IClassFixture<NsaApiFactory>
     [Fact]
     public async Task Seeded_cart_and_order_tracking_routes_pass_smoke_checks()
     {
-        const string visitor = "bmacha2015@gmail.com";
+        const string visitor = "visitor@example.test";
         using var cartResponse = await client.GetAsync(
             $"/api/v2/cart/{Uri.EscapeDataString(visitor)}");
         Assert.Equal(HttpStatusCode.OK, cartResponse.StatusCode);
@@ -299,7 +320,7 @@ public sealed class ApiContractTests : IClassFixture<NsaApiFactory>
     }
 
     [Fact]
-    public async Task Bulk_submission_returns_202_with_a_stable_job_location_and_reaches_a_terminal_state()
+    public async Task Bulk_submission_returns_202_with_a_stable_job_location_and_persisted_status()
     {
         using var response = await client.PostAsJsonAsync("/api/v2/notifications/bulk", new
         {
@@ -336,22 +357,18 @@ public sealed class ApiContractTests : IClassFixture<NsaApiFactory>
             GetLocationPath(response.Headers.Location!),
             StringComparison.OrdinalIgnoreCase);
         Assert.Contains(jobId.ToString(), response.Headers.Location!.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.True(response.Headers.TryGetValues("X-Correlation-ID", out var correlationHeaders));
+        Assert.False(string.IsNullOrWhiteSpace(correlationHeaders.Single()));
 
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        while (true)
-        {
-            using var statusResponse = await client.GetAsync(response.Headers.Location, timeout.Token);
-            Assert.Equal(HttpStatusCode.OK, statusResponse.StatusCode);
-            using var status = JsonDocument.Parse(await statusResponse.Content.ReadAsStringAsync(timeout.Token));
-            var state = status.RootElement.GetProperty("status").GetString();
-            if (state is "Completed" or "CompletedWithErrors")
-            {
-                Assert.Equal(2, status.RootElement.GetProperty("processedCount").GetInt32());
-                break;
-            }
-
-            await Task.Delay(10, timeout.Token);
-        }
+        using var statusResponse = await client.GetAsync(response.Headers.Location);
+        Assert.Equal(HttpStatusCode.OK, statusResponse.StatusCode);
+        using var status = JsonDocument.Parse(await statusResponse.Content.ReadAsStringAsync());
+        Assert.Equal("Queued", status.RootElement.GetProperty("status").GetString());
+        Assert.Equal(2, status.RootElement.GetProperty("totalCount").GetInt32());
+        Assert.Equal(0, status.RootElement.GetProperty("processedCount").GetInt32());
+        Assert.Equal(
+            correlationHeaders.Single(),
+            status.RootElement.GetProperty("correlationId").GetString());
     }
 
     public static IEnumerable<object[]> InvalidNotificationPayloads()
@@ -385,6 +402,41 @@ public sealed class ApiContractTests : IClassFixture<NsaApiFactory>
         location.IsAbsoluteUri
             ? location.AbsolutePath
             : location.OriginalString.Split('?', '#')[0];
+
+    private static void AssertOpenApiDocumentation(JsonElement document)
+    {
+        var httpMethods = new HashSet<string>(
+            ["get", "put", "post", "delete", "options", "head", "patch", "trace"],
+            StringComparer.Ordinal);
+
+        foreach (var path in document.GetProperty("paths").EnumerateObject())
+        {
+            foreach (var operation in path.Value.EnumerateObject().Where(candidate => httpMethods.Contains(candidate.Name)))
+            {
+                Assert.True(
+                    operation.Value.TryGetProperty("summary", out var summary)
+                    && !string.IsNullOrWhiteSpace(summary.GetString()),
+                    $"{operation.Name.ToUpperInvariant()} {path.Name} is missing its XML-derived summary.");
+
+                var responses = operation.Value.GetProperty("responses");
+                Assert.NotEmpty(responses.EnumerateObject());
+                foreach (var response in responses.EnumerateObject())
+                {
+                    Assert.True(
+                        response.Value.TryGetProperty("description", out var description)
+                        && !string.IsNullOrWhiteSpace(description.GetString()),
+                        $"{operation.Name.ToUpperInvariant()} {path.Name} response {response.Name} has no documented description.");
+
+                    if (response.Name.Length == 3 && (response.Name[0] is '4' or '5'))
+                    {
+                        Assert.True(
+                            response.Value.GetProperty("content").TryGetProperty("application/problem+json", out _),
+                            $"{operation.Name.ToUpperInvariant()} {path.Name} response {response.Name} is missing its RFC 7807 schema.");
+                    }
+                }
+            }
+        }
+    }
 
     private static string GetProblemDetailsSchemaReference(JsonElement response) =>
         response

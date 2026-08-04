@@ -4,6 +4,10 @@ namespace NSA.Application.Abstractions;
 
 public interface IBulkNotificationJobService
 {
-    BulkNotificationJobDto Queue(CreateBulkNotificationsRequest request);
-    BulkNotificationJobDto? GetStatus(Guid jobId);
+    Task<BulkNotificationJobDto> QueueAsync(
+        CreateBulkNotificationsRequest request,
+        string correlationId,
+        CancellationToken cancellationToken);
+
+    Task<BulkNotificationJobDto?> GetStatusAsync(Guid jobId, CancellationToken cancellationToken);
 }

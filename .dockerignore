@@ -1,0 +1,25 @@
+.git/
+.github/
+.vs/
+.vscode/
+.idea/
+
+**/bin/
+**/obj/
+TestResults/
+artifacts/
+coverage/
+
+*.user
+*.suo
+*.rsuser
+*.log
+*.pfx
+*.p12
+*.pem
+*.key
+
+# Local environment files can contain credentials. The documented template is safe.
+.env
+.env.*
+!.env.example

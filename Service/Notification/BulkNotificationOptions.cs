@@ -7,9 +7,6 @@ public sealed class BulkNotificationOptions
     public const string SectionName = "BulkNotifications";
 
     [Range(1, 10_000)]
-    public int QueueCapacity { get; init; } = 100;
-
-    [Range(1, 10_000)]
     public int MaxTrackedJobs { get; init; } = 1_000;
 
     [Range(1, 100)]
