@@ -1,0 +1,20 @@
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+WORKDIR /src
+
+COPY notification-api/NSA.csproj notification-api/
+COPY notification.worker/NSA.Worker.csproj notification.worker/
+RUN dotnet restore "notification.worker/NSA.Worker.csproj"
+
+COPY notification-api/ notification-api/
+COPY notification.worker/ notification.worker/
+RUN dotnet publish "notification.worker/NSA.Worker.csproj" \
+    --configuration Release \
+    --no-restore \
+    --output /app/publish \
+    /p:UseAppHost=false
+
+FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS final
+WORKDIR /app
+COPY --from=build /app/publish .
+USER app
+ENTRYPOINT ["dotnet", "NSA.Worker.dll"]

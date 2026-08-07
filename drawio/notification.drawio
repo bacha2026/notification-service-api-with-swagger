@@ -1,4 +1,4 @@
-<mxfile host="app.diagrams.net" agent="Codex" pages="2">
+<mxfile host="app.diagrams.net" agent="Codex" pages="4">
   <diagram id="system-architecture" name="Historical Week 1-2 Application Architecture">
     <mxGraphModel dx="975" dy="536" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1120" math="0" shadow="0">
       <root>
@@ -106,7 +106,7 @@
         <mxCell id="emailSink" parent="1" style="shape=message;whiteSpace=wrap;html=1;outlineConnect=0;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=12;" value="Application Logs&lt;br&gt;policy transitions + safe state&lt;br&gt;no recipient, subject, or body" vertex="1">
           <mxGeometry height="105" width="250" x="1210" y="540" as="geometry" />
         </mxCell>
-        <mxCell id="flowNote" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=13;align=left;spacingLeft=10;" value="Historical Week 1-2 runtime flow (superseded for bulk processing by ADR 004):&lt;br&gt;1. URL versioning selects v1/v2; v1 emits Deprecation + Sunset&lt;br&gt;2. Swagger publishes concrete versioned contracts&lt;br&gt;3. Controllers delegate to services; all errors use Problem Details&lt;br&gt;4. Repositories query/save through NotificationDbContext&lt;br&gt;5. Week 2 bulk admission used a bounded in-memory queue&lt;br&gt;6. Week 2 BulkNotificationWorker processed jobs in-process&lt;br&gt;7. Week 3 replaces items 5-6 with SQL-backed jobs, RabbitMQ, and a separate WorkerService" vertex="1">
+        <mxCell id="flowNote" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=13;align=left;spacingLeft=10;" value="Historical Week 1-2 runtime flow (superseded for bulk processing by ADR 003):&lt;br&gt;1. URL versioning selects v1/v2; v1 emits Deprecation + Sunset&lt;br&gt;2. Swagger publishes concrete versioned contracts&lt;br&gt;3. Controllers delegate to services; all errors use Problem Details&lt;br&gt;4. Repositories query/save through NotificationDbContext&lt;br&gt;5. Week 2 bulk admission used a bounded in-memory queue&lt;br&gt;6. Week 2 BulkNotificationWorker processed jobs in-process&lt;br&gt;7. Week 3 replaces items 5-6 with SQL-backed jobs, RabbitMQ, and a separate WorkerService" vertex="1">
           <mxGeometry height="120" width="690" x="370" y="960" as="geometry" />
         </mxCell>
         <mxCell id="edgeVisitorSwagger" edge="1" parent="1" source="visitor" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#6c8ebf;endArrow=block;endFill=1;fontSize=11;" target="swaggerClient" value="explores API">
@@ -255,7 +255,7 @@
         <mxCell id="notificationRecordEvent" value="Persist Notification record&lt;br&gt;Recipient, channel, subject, body, order id, sent/read flags&lt;br&gt;Notification entity owns create/update rules" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#b85450;fontSize=13;" vertex="1" parent="1">
           <mxGeometry x="880" y="680" width="330" height="60" as="geometry" />
         </mxCell>
-        <mxCell id="emailEvent" value="Persist pending intent, then send via IEmailSender&lt;br&gt;Postbound adapter: timeout + retry + circuit breaker&lt;br&gt;disabled by default; logs recipient + subject only" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#b85450;fontSize=13;" vertex="1" parent="1">
+        <mxCell id="emailEvent" value="NSA.Worker processes queued job&lt;br&gt;creates InApp Notification records&lt;br&gt;persists progress, then ACK / retry / DLQ&lt;br&gt;no outbound email provider" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#b85450;fontSize=13;" vertex="1" parent="1">
           <mxGeometry x="1260" y="670" width="250" height="80" as="geometry" />
         </mxCell>
         <mxCell id="e1" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#6c8ebf;" edge="1" parent="1" source="draft" target="pending">
@@ -300,7 +300,7 @@
         <mxCell id="ne2" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#b85450;" edge="1" parent="1" source="statusUpdateEvent" target="notificationRecordEvent">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="ne3" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#b85450;" edge="1" parent="1" source="notificationRecordEvent" target="emailEvent">
+        <mxCell id="ne3" value="broker-backed order-placement path" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#b85450;" edge="1" parent="1" source="notificationRecordEvent" target="emailEvent">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
       </root>
@@ -344,7 +344,7 @@
         <mxCell id="rt-projection" value="Projection / Inbox consumer&lt;br&gt;dedupe by messageId&lt;br&gt;apply only next order sequence" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=13;" vertex="1" parent="rt-1">
           <mxGeometry x="1180" y="360" width="210" height="95" as="geometry" />
         </mxCell>
-        <mxCell id="rt-notify" value="Notification worker&lt;br&gt;email/push adapter boundary&lt;br&gt;idempotent side effects" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=13;" vertex="1" parent="rt-1">
+        <mxCell id="rt-notify" value="Notification worker&lt;br&gt;persists InApp Notification records&lt;br&gt;idempotent terminal-job handling" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=13;" vertex="1" parent="rt-1">
           <mxGeometry x="1180" y="500" width="210" height="90" as="geometry" />
         </mxCell>
         <mxCell id="rt-contract" value="Correctness and recovery contract&lt;br&gt;&lt;br&gt;Stable eventId, messageId, orderId, correlationId, schemaVersion, and per-order sequence. At-least-once delivery is expected; Outbox prevents accepted-event loss and Inbox/deduplication prevents repeated state transitions. Clients reconnect with last-seen sequence, fetch a snapshot, then resume. Authorization is checked for every subscription. Expand/contract database changes keep blue and green versions compatible." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=13;align=left;verticalAlign=top;spacing=14;" vertex="1" parent="rt-1">
@@ -362,6 +362,68 @@
         <mxCell id="rt-e10" value="resume snapshot" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#9673a6;" edge="1" parent="rt-1" source="rt-redis" target="rt-realtime"><mxGeometry relative="1" as="geometry" /></mxCell>
         <mxCell id="rt-e11" value="live event" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#9673a6;" edge="1" parent="rt-1" source="rt-broker" target="rt-realtime"><mxGeometry relative="1" as="geometry" /></mxCell>
         <mxCell id="rt-e12" value="notification event" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#9673a6;" edge="1" parent="rt-1" source="rt-broker" target="rt-notify"><mxGeometry relative="1" as="geometry" /></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram id="current-notification-architecture" name="Current Notification Architecture">
+    <mxGraphModel dx="1600" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="950" math="0" shadow="0">
+      <root>
+        <mxCell id="cur-0" />
+        <mxCell id="cur-1" parent="cur-0" />
+        <mxCell id="cur-title" value="Current Order Notification Architecture — Polly-Protected RabbitMQ Publication" style="text;html=1;strokeColor=none;fillColor=none;fontSize=25;fontStyle=1;fontColor=#173F4A;align=center;verticalAlign=middle;" vertex="1" parent="cur-1">
+          <mxGeometry x="180" y="25" width="1240" height="45" as="geometry" />
+        </mxCell>
+        <mxCell id="cur-api-boundary" value="ASP.NET Core API" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;fontSize=17;verticalAlign=top;spacingTop=12;" vertex="1" parent="cur-1">
+          <mxGeometry x="220" y="100" width="760" height="500" as="geometry" />
+        </mxCell>
+        <mxCell id="cur-infra-boundary" value="Broker and Worker Boundary" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=1;fontSize=17;verticalAlign=top;spacingTop=12;" vertex="1" parent="cur-1">
+          <mxGeometry x="1020" y="100" width="520" height="500" as="geometry" />
+        </mxCell>
+        <mxCell id="cur-client" value="Client&lt;br&gt;POST /api/v2/orders&lt;br&gt;GET notification job status" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontSize=13;" vertex="1" parent="cur-1">
+          <mxGeometry x="30" y="185" width="155" height="95" as="geometry" />
+        </mxCell>
+        <mxCell id="cur-orders" value="OrdersController + OrderService&lt;br&gt;commit order first&lt;br&gt;201 + Confirmed / Unconfirmed / Rejected" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontSize=13;" vertex="1" parent="cur-1">
+          <mxGeometry x="255" y="165" width="205" height="105" as="geometry" />
+        </mxCell>
+        <mxCell id="cur-job" value="BulkNotificationJobService&lt;br&gt;validate + capacity check&lt;br&gt;persist job and two InApp items&lt;br&gt;build BulkNotificationRequestedV1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=13;" vertex="1" parent="cur-1">
+          <mxGeometry x="500" y="155" width="220" height="125" as="geometry" />
+        </mxCell>
+        <mxCell id="cur-polly" value="RabbitMqBulkNotificationPublisher&lt;br&gt;mandatory persistent publish + confirms&lt;br&gt;Polly: 2 retries (200/400 ms)&lt;br&gt;shared breaker: 3 failures / 30 s" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=13;" vertex="1" parent="cur-1">
+          <mxGeometry x="755" y="150" width="195" height="135" as="geometry" />
+        </mxCell>
+        <mxCell id="cur-sql" value="SQL Server — source of job status&lt;br&gt;Orders + OrderItems&lt;br&gt;BulkNotificationJobs + Items&lt;br&gt;Notifications (InApp records)" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=13;" vertex="1" parent="cur-1">
+          <mxGeometry x="440" y="405" width="245" height="135" as="geometry" />
+        </mxCell>
+        <mxCell id="cur-status" value="Bulk status endpoint&lt;br&gt;reads persisted counters/state" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontSize=13;" vertex="1" parent="cur-1">
+          <mxGeometry x="255" y="430" width="155" height="75" as="geometry" />
+        </mxCell>
+        <mxCell id="cur-rabbit" value="RabbitMQ&lt;br&gt;direct command exchange&lt;br&gt;quorum command queue&lt;br&gt;versioned job-reference command" style="shape=hexagon;perimeter=hexagonPerimeter2;whiteSpace=wrap;html=1;fixedSize=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=13;" vertex="1" parent="cur-1">
+          <mxGeometry x="1060" y="155" width="210" height="125" as="geometry" />
+        </mxCell>
+        <mxCell id="cur-worker" value="NSA.Worker&lt;br&gt;RabbitMqBulkNotificationWorker&lt;br&gt;manual ACK, prefetch 1&lt;br&gt;3 processing attempts" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=13;" vertex="1" parent="cur-1">
+          <mxGeometry x="1060" y="350" width="210" height="115" as="geometry" />
+        </mxCell>
+        <mxCell id="cur-processor" value="BulkNotificationProcessor&lt;br&gt;load pending job/items&lt;br&gt;INotificationService creates InApp records&lt;br&gt;persist progress before ACK" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=13;" vertex="1" parent="cur-1">
+          <mxGeometry x="755" y="390" width="220" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="cur-dlq" value="Dead-letter exchange + quorum DLQ&lt;br&gt;malformed, unsupported, or exhausted work&lt;br&gt;operator review required" style="shape=hexagon;perimeter=hexagonPerimeter2;whiteSpace=wrap;html=1;fixedSize=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;" vertex="1" parent="cur-1">
+          <mxGeometry x="1310" y="350" width="195" height="115" as="geometry" />
+        </mxCell>
+        <mxCell id="cur-contract" value="Current guarantee and boundary&lt;br&gt;&lt;br&gt;Polly protects only API → RabbitMQ publication. Worker republish/retry and DLQ handling are separate. SQL commit plus broker publish is not atomic; a lost confirmation can produce a duplicate command. Delivery is at least once. There is no outbound email provider. Transactional Outbox/Inbox deduplication remains the next reliability boundary." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=13;align=left;verticalAlign=top;spacing=14;" vertex="1" parent="cur-1">
+          <mxGeometry x="180" y="665" width="1240" height="145" as="geometry" />
+        </mxCell>
+        <mxCell id="cur-e1" value="place order" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;" edge="1" parent="cur-1" source="cur-client" target="cur-orders"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="cur-e2" value="after commit: queue notifications" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#82b366;" edge="1" parent="cur-1" source="cur-orders" target="cur-job"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="cur-e3" value="persist order + job/items" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#6c8ebf;" edge="1" parent="cur-1" source="cur-job" target="cur-sql"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="cur-e4" value="publish same IDs across retries" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#d6b656;" edge="1" parent="cur-1" source="cur-job" target="cur-polly"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="cur-e5" value="Polly boundary: publish + confirm" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#b85450;" edge="1" parent="cur-1" source="cur-polly" target="cur-rabbit"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="cur-e6" value="manual-ACK consume" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#9673a6;" edge="1" parent="cur-1" source="cur-rabbit" target="cur-worker"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="cur-e7" value="ProcessAsync(jobId)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#82b366;" edge="1" parent="cur-1" source="cur-worker" target="cur-processor"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="cur-e8" value="load/update job; create InApp records" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#6c8ebf;" edge="1" parent="cur-1" source="cur-processor" target="cur-sql"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="cur-e9" value="ACK success / republish retry" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;dashed=1;strokeColor=#9673a6;" edge="1" parent="cur-1" source="cur-worker" target="cur-rabbit"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="cur-e10" value="final reject → DLX" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#b85450;" edge="1" parent="cur-1" source="cur-rabbit" target="cur-dlq"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="cur-e11" value="poll status" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#6c8ebf;" edge="1" parent="cur-1" source="cur-client" target="cur-status"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="cur-e12" value="read persisted state" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#6c8ebf;" edge="1" parent="cur-1" source="cur-status" target="cur-sql"><mxGeometry relative="1" as="geometry" /></mxCell>
       </root>
     </mxGraphModel>
   </diagram>

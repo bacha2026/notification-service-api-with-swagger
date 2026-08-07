@@ -1,32 +1,27 @@
-# Build results
-bin/
-obj/
-
-# User-specific files
-.vs/
-.vscode/
+# .NET
+**/bin/
+**/obj/
+**/TestResults/
+**/artifacts/
+**/coverage/
+**/node_modules/
+**/.next/
+**/.angular/
+**/dist/
+**/out/
 *.user
 *.suo
 *.rsuser
-
-# Logs and temporary files
 *.log
-TestResults/
-artifacts/
 
-# Environment/local secrets
-.env
-.env.*
-!.env.example
-appsettings.Local.json
-*.pfx
-*.p12
-*.pem
-*.key
+# Local credentials
+**/.env
+**/.env.*
+!**/.env.example
 
-# Additional IDE and coverage output
-.idea/
-coverage/
-coverage.*
-*.coverage
-*.coveragexml
+# IDE and OS files
+**/.vs/
+**/.vscode/
+**/.idea/
+.DS_Store
+Thumbs.db

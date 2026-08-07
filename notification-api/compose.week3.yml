@@ -1,0 +1,120 @@
+# Week 3 local training stack only. Required credentials come from an ignored
+# generated .env file or process environment; no usable credential is tracked here.
+name: nsa-week3
+
+services:
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    ports:
+    - "127.0.0.1:14330:1433"
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: Developer
+      MSSQL_SA_PASSWORD: "${WEEK3_SQL_PASSWORD:?Set WEEK3_SQL_PASSWORD in .env first}"
+    volumes:
+      - sqlserver-data:/var/opt/mssql
+    networks:
+      - week3
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$${MSSQL_SA_PASSWORD}" -C -Q "SELECT 1" >/dev/null
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    restart: unless-stopped
+
+  rabbitmq:
+    image: rabbitmq:4.3-management
+    environment:
+      RABBITMQ_DEFAULT_USER: "${WEEK3_RABBITMQ_USERNAME:?Set WEEK3_RABBITMQ_USERNAME in .env first}"
+      RABBITMQ_DEFAULT_PASS: "${WEEK3_RABBITMQ_PASSWORD:?Set WEEK3_RABBITMQ_PASSWORD in .env first}"
+    ports:
+      - "127.0.0.1:15672:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    networks:
+      - week3
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: "http://+:8080"
+      HttpsRedirection__Enabled: "false"
+      ConnectionStrings__NotificationDb: >-
+        Server=sqlserver,1433;Database=NotificationServiceDb;User Id=sa;Password=${WEEK3_SQL_PASSWORD:?Set WEEK3_SQL_PASSWORD in .env first};Encrypt=False;TrustServerCertificate=True;MultipleActiveResultSets=true;Connect Timeout=2;ConnectRetryCount=0
+      Database__ApplyMigrationsOnStartup: "true"
+      RabbitMq__HostName: rabbitmq
+      RabbitMq__UserName: "${WEEK3_RABBITMQ_USERNAME:?Set WEEK3_RABBITMQ_USERNAME in .env first}"
+      RabbitMq__Password: "${WEEK3_RABBITMQ_PASSWORD:?Set WEEK3_RABBITMQ_PASSWORD in .env first}"
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - week3
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - curl --fail --silent --show-error http://localhost:8080/health/ready >/dev/null
+      interval: 5s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: ..
+      dockerfile: notification-api/Dockerfile.worker
+    environment:
+      ConnectionStrings__NotificationDb: >-
+        Server=sqlserver,1433;Database=NotificationServiceDb;User Id=sa;Password=${WEEK3_SQL_PASSWORD:?Set WEEK3_SQL_PASSWORD in .env first};Encrypt=False;TrustServerCertificate=True;MultipleActiveResultSets=true;Connect Timeout=2;ConnectRetryCount=0
+      Database__ApplyMigrationsOnStartup: "false"
+      RabbitMq__HostName: rabbitmq
+      RabbitMq__UserName: "${WEEK3_RABBITMQ_USERNAME:?Set WEEK3_RABBITMQ_USERNAME in .env first}"
+      RabbitMq__Password: "${WEEK3_RABBITMQ_PASSWORD:?Set WEEK3_RABBITMQ_PASSWORD in .env first}"
+      # Set WEEK3_FAILURE_INJECTION_SUBJECT=[week3-poison] only for the DLQ demo.
+      RabbitMq__FailureInjectionSubject: "${WEEK3_FAILURE_INJECTION_SUBJECT:-}"
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    networks:
+      - week3
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/nsa-worker-ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  sqlserver-data:
+    name: nsa-week3-sqlserver-data-v2
+  rabbitmq-data:
+    name: nsa-week3-rabbitmq-data-v2
+
+networks:
+  week3:
+    name: nsa-week3-network
+    driver: bridge

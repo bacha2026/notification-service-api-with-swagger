@@ -1,0 +1,32 @@
+# Build results
+bin/
+obj/
+
+# User-specific files
+.vs/
+.vscode/
+*.user
+*.suo
+*.rsuser
+
+# Logs and temporary files
+*.log
+TestResults/
+artifacts/
+
+# Environment/local secrets
+.env
+.env.*
+!.env.example
+appsettings.Local.json
+*.pfx
+*.p12
+*.pem
+*.key
+
+# Additional IDE and coverage output
+.idea/
+coverage/
+coverage.*
+*.coverage
+*.coveragexml
