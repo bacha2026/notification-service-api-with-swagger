@@ -58,6 +58,28 @@ public sealed class NotificationService(INotificationRepository notificationRepo
         return true;
     }
 
+    public async Task<int> DeleteNotificationsForVisitorAsync(
+        string visitorEmail,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(visitorEmail))
+        {
+            throw new RequestValidationException("Visitor email is required.");
+        }
+
+        var notifications = await notificationRepository.GetNotificationsForVisitorAsync(
+            visitorEmail.Trim(),
+            cancellationToken);
+        if (notifications.Count == 0)
+        {
+            return 0;
+        }
+
+        notificationRepository.RemoveRange(notifications);
+        await notificationRepository.SaveChangesAsync(cancellationToken);
+        return notifications.Count;
+    }
+
     private static NotificationDto ToDto(Notification notification)
     {
         return new NotificationDto(notification.Id, notification.RecipientEmail, notification.Channel, notification.Subject, notification.Body, notification.OrderId, notification.IsRead, notification.CreatedAtUtc, notification.SentAtUtc);

@@ -82,6 +82,23 @@ public sealed class NotificationsController(INotificationService notificationSer
         return deleted ? NoContent() : NotFound();
     }
 
+    /// <summary>Deletes all notifications associated with a visitor.</summary>
+    /// <remarks>Supply the visitor email as a query parameter. This administrative operation deletes notifications sent directly to that visitor and notifications, including admin notifications, linked to any of the visitor's orders. Orders and bulk-job history are not deleted. Repeating the operation is safe.</remarks>
+    /// <response code="204">All matching notification records were deleted, or none existed.</response>
+    /// <response code="400">The visitor email is missing or invalid.</response>
+    [HttpDelete("visitor")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> DeleteNotificationsForVisitor(
+        [FromQuery] DeleteVisitorNotificationsRequest request,
+        CancellationToken cancellationToken)
+    {
+        await notificationService.DeleteNotificationsForVisitorAsync(
+            request.VisitorEmail,
+            cancellationToken);
+        return NoContent();
+    }
+
     /// <summary>Queues a batch of notification records for asynchronous processing.</summary>
     /// <remarks>Send between 1 and 100 notifications in the request body. Processing continues in the background after the endpoint returns; save the returned jobId or Location header and use the bulk status endpoint to monitor progress.</remarks>
     /// <response code="202">The job was accepted. Use the status endpoint and returned job id to monitor it.</response>

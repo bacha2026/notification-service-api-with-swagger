@@ -61,6 +61,18 @@ public sealed class Order
         UpdatedAtUtc = updatedAtUtc;
     }
 
+    public bool CancelByVisitor(DateTimeOffset updatedAtUtc)
+    {
+        if (OrderStatus == OrderStatus.Cancelled)
+        {
+            return false;
+        }
+
+        OrderStatus = OrderStatus.Cancelled;
+        UpdatedAtUtc = updatedAtUtc;
+        return true;
+    }
+
     private void RecalculateTotal()
     {
         TotalAmount = Items.Sum(item => item.Subtotal);

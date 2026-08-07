@@ -68,6 +68,37 @@ public sealed class OrderService(
         return ToDto(order);
     }
 
+    public async Task<OrderDto?> CancelOrderAsync(
+        int id,
+        CancelOrderRequest request,
+        CancellationToken cancellationToken)
+    {
+        var visitorEmail = NormalizeRequiredVisitorEmail(request.VisitorEmail);
+        var order = await orderRepository.GetByIdWithItemsAsync(id, cancellationToken);
+        if (order is null
+            || !string.Equals(order.VisitorEmail, visitorEmail, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        if (!order.CancelByVisitor(DateTimeOffset.UtcNow))
+        {
+            return ToDto(order);
+        }
+
+        var body = $"Order #{order.Id} for {order.VisitorEmail} was cancelled by the visitor. "
+            + BuildOrderMessage(order);
+        await CreateNotificationAsync(
+            AdminEmail,
+            $"Order #{order.Id} cancelled by visitor",
+            body,
+            order.Id,
+            cancellationToken);
+        await orderRepository.SaveChangesAsync(cancellationToken);
+
+        return ToDto(order);
+    }
+
     private string AdminEmail => configuration["NotificationEmails:AdminEmail"] ?? "admin@example.test";
 
     private async Task<(BulkNotificationJobDto? Job, NotificationHandoffStatus Status)>
@@ -151,6 +182,16 @@ public sealed class OrderService(
         return string.IsNullOrWhiteSpace(visitorEmail)
             ? configuration["NotificationEmails:DefaultVisitorEmail"] ?? "visitor@example.test"
             : visitorEmail.Trim();
+    }
+
+    private static string NormalizeRequiredVisitorEmail(string visitorEmail)
+    {
+        if (string.IsNullOrWhiteSpace(visitorEmail))
+        {
+            throw new RequestValidationException("Visitor email is required.");
+        }
+
+        return visitorEmail.Trim();
     }
 
     private static OrderDto ToDto(Order order)

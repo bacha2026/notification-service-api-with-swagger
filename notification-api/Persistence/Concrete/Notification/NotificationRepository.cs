@@ -29,6 +29,20 @@ public sealed class NotificationRepository(NotificationDbContext dbContext) : IN
         return dbContext.Notifications.FindAsync([id], cancellationToken).AsTask();
     }
 
+    public async Task<IReadOnlyList<Notification>> GetNotificationsForVisitorAsync(
+        string visitorEmail,
+        CancellationToken cancellationToken)
+    {
+        var orderIds = dbContext.Orders
+            .Where(order => order.VisitorEmail == visitorEmail)
+            .Select(order => order.Id);
+
+        return await dbContext.Notifications
+            .Where(notification => notification.RecipientEmail == visitorEmail
+                || notification.OrderId.HasValue && orderIds.Contains(notification.OrderId.Value))
+            .ToListAsync(cancellationToken);
+    }
+
     public Task<bool> OrderExistsAsync(int orderId, CancellationToken cancellationToken)
     {
         return dbContext.Orders.AnyAsync(order => order.Id == orderId, cancellationToken);
@@ -42,6 +56,11 @@ public sealed class NotificationRepository(NotificationDbContext dbContext) : IN
     public void Remove(Notification notification)
     {
         dbContext.Notifications.Remove(notification);
+    }
+
+    public void RemoveRange(IEnumerable<Notification> notifications)
+    {
+        dbContext.Notifications.RemoveRange(notifications);
     }
 
     public Task SaveChangesAsync(CancellationToken cancellationToken)

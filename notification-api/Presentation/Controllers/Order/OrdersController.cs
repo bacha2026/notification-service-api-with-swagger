@@ -66,8 +66,26 @@ public sealed class OrdersController(IOrderService orderService) : ControllerBas
         return Created(location, order);
     }
 
+    /// <summary>Cancels an order on behalf of its visitor and notifies the admin.</summary>
+    /// <remarks>Pass the order id in the route and the owning visitor's email in the request body. The operation changes only the overall order status to Cancelled, preserves payment, fulfillment, and delivery progress, and creates one in-app notification for the admin. Repeating an already completed cancellation does not create another notification.</remarks>
+    /// <response code="200">Returns the cancelled order.</response>
+    /// <response code="400">The visitor email is invalid.</response>
+    /// <response code="404">The order does not exist or does not belong to the supplied visitor.</response>
+    [HttpPatch("{id:int}/cancel")]
+    [ProducesResponseType(typeof(OrderDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<OrderDto>> CancelOrder(
+        int id,
+        CancelOrderRequest request,
+        CancellationToken cancellationToken)
+    {
+        var order = await orderService.CancelOrderAsync(id, request, cancellationToken);
+        return order is null ? NotFound() : Ok(order);
+    }
+
     /// <summary>Updates order tracking statuses and notifies the visitor and admin.</summary>
-    /// <remarks>Pass the order id in the route and send all four status values in the request body. Use this administrative operation whenever payment, fulfillment, or delivery progress changes; it also creates notifications for the visitor and admin.</remarks>
+    /// <remarks>Pass the order id in the route and send all four status values in the request body. This administrative operation saves the order, payment, fulfillment, and delivery values and creates in-app notifications for both the visitor who placed the order and the admin.</remarks>
     /// <response code="200">Returns the updated order.</response>
     /// <response code="400">One or more status values are invalid.</response>
     /// <response code="404">The requested order does not exist.</response>

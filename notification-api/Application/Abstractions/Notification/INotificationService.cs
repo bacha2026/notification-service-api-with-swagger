@@ -9,4 +9,6 @@ public interface INotificationService
     Task<NotificationDto> CreateNotificationAsync(CreateNotificationRequest request, CancellationToken cancellationToken);
     Task<NotificationDto?> UpdateNotificationAsync(int id, UpdateNotificationRequest request, CancellationToken cancellationToken);
     Task<bool> DeleteNotificationAsync(int id, CancellationToken cancellationToken);
+    Task<int> DeleteNotificationsForVisitorAsync(string visitorEmail, CancellationToken cancellationToken) =>
+        throw new NotSupportedException();
 }

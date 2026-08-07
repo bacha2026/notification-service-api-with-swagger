@@ -126,4 +126,68 @@ public sealed class OrderNotificationWorkflowTests : IClassFixture<NsaApiFactory
         Assert.Equal(2, completed.RootElement.GetProperty("processedCount").GetInt32());
         Assert.Equal(2, completed.RootElement.GetProperty("succeededCount").GetInt32());
     }
+
+    [Fact]
+    public async Task Admin_status_update_saves_all_statuses_and_notifies_the_visitor_and_admin()
+    {
+        const int orderId = 2;
+        int highestExistingNotificationId;
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var dbContext = scope.ServiceProvider.GetRequiredService<NotificationDbContext>();
+            highestExistingNotificationId = await dbContext.Notifications
+                .Where(notification => notification.OrderId == orderId)
+                .MaxAsync(notification => notification.Id);
+        }
+
+        using var response = await client.PatchAsJsonAsync($"/api/v2/orders/{orderId}/status", new
+        {
+            orderStatus = OrderStatus.Completed,
+            paymentStatus = PaymentStatus.Paid,
+            fulfillmentStatus = FulfillmentStatus.Packed,
+            deliveryStatus = DeliveryStatus.Delivered
+        });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var updatedOrder = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal((int)OrderStatus.Completed, updatedOrder.RootElement.GetProperty("orderStatus").GetInt32());
+        Assert.Equal((int)PaymentStatus.Paid, updatedOrder.RootElement.GetProperty("paymentStatus").GetInt32());
+        Assert.Equal((int)FulfillmentStatus.Packed, updatedOrder.RootElement.GetProperty("fulfillmentStatus").GetInt32());
+        Assert.Equal((int)DeliveryStatus.Delivered, updatedOrder.RootElement.GetProperty("deliveryStatus").GetInt32());
+
+        await using var verificationScope = factory.Services.CreateAsyncScope();
+        var verificationContext = verificationScope.ServiceProvider.GetRequiredService<NotificationDbContext>();
+        var persistedOrder = await verificationContext.Orders
+            .AsNoTracking()
+            .SingleAsync(order => order.Id == orderId);
+        Assert.Equal(OrderStatus.Completed, persistedOrder.OrderStatus);
+        Assert.Equal(PaymentStatus.Paid, persistedOrder.PaymentStatus);
+        Assert.Equal(FulfillmentStatus.Packed, persistedOrder.FulfillmentStatus);
+        Assert.Equal(DeliveryStatus.Delivered, persistedOrder.DeliveryStatus);
+
+        var newNotifications = await verificationContext.Notifications
+            .AsNoTracking()
+            .Where(notification => notification.OrderId == orderId
+                && notification.Id > highestExistingNotificationId)
+            .ToListAsync();
+
+        Assert.Equal(2, newNotifications.Count);
+        var visitorNotification = Assert.Single(
+            newNotifications,
+            notification => notification.RecipientEmail == "visitor@example.test");
+        Assert.Equal("visitor@example.test", visitorNotification.RecipientEmail);
+        Assert.Equal(NotificationChannel.InApp, visitorNotification.Channel);
+        Assert.Equal($"Order #{orderId} status updated", visitorNotification.Subject);
+        Assert.Contains("Status: Completed", visitorNotification.Body, StringComparison.Ordinal);
+        Assert.Contains("Payment: Paid", visitorNotification.Body, StringComparison.Ordinal);
+        Assert.Contains("Fulfillment: Packed", visitorNotification.Body, StringComparison.Ordinal);
+        Assert.Contains("Delivery: Delivered", visitorNotification.Body, StringComparison.Ordinal);
+
+        var adminNotification = Assert.Single(
+            newNotifications,
+            notification => notification.RecipientEmail == "admin@example.test");
+        Assert.Equal(NotificationChannel.InApp, adminNotification.Channel);
+        Assert.Equal($"Order #{orderId} status updated", adminNotification.Subject);
+        Assert.Equal(visitorNotification.Body, adminNotification.Body);
+    }
 }

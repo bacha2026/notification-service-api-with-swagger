@@ -20,6 +20,23 @@ public sealed record CreateOrderRequest
     public string VisitorEmail { get; init; } = string.Empty;
 }
 
+/// <summary>Request from a visitor to cancel one of their orders.</summary>
+public sealed record CancelOrderRequest
+{
+    public CancelOrderRequest()
+    {
+    }
+
+    public CancelOrderRequest(string visitorEmail)
+    {
+        VisitorEmail = visitorEmail;
+    }
+
+    /// <summary>Email address that owns the order being cancelled.</summary>
+    [Required, EmailAddress, StringLength(320, MinimumLength = 1)]
+    public string VisitorEmail { get; init; } = string.Empty;
+}
+
 /// <summary>Outcome of handing an order's notification job to the asynchronous pipeline.</summary>
 public enum NotificationHandoffStatus
 {

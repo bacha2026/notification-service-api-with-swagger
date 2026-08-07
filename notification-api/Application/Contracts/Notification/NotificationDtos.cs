@@ -29,6 +29,14 @@ public sealed record NotificationDto
     public DateTimeOffset? SentAtUtc { get; init; }
 }
 
+/// <summary>Identifies the visitor whose related notifications an admin wants to delete.</summary>
+public sealed record DeleteVisitorNotificationsRequest
+{
+    /// <summary>Email address of the visitor whose notification history should be deleted.</summary>
+    [Required, EmailAddress, StringLength(320, MinimumLength = 1)]
+    public string VisitorEmail { get; init; } = string.Empty;
+}
+
 /// <summary>Request to create and dispatch a notification.</summary>
 public sealed record CreateNotificationRequest
 {
