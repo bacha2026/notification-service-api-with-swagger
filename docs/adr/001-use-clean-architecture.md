@@ -1,6 +1,6 @@
 # ADR 001: Use Clean Architecture
 
-**Status:** Accepted
+**Status:** 
 
 ## Context
 

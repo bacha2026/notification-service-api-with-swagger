@@ -1,17 +1,15 @@
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Options;
 using NSA.Application.Abstractions;
+using NSA.Application.Configuration;
 using NSA.Application.Contracts;
 using NSA.Application.Exceptions;
 using NSA.Domain.Entities;
-using NSA.Persistence;
 
 namespace NSA.Service;
 
 public sealed class BulkNotificationJobService(
-    NotificationDbContext dbContext,
+    IBulkNotificationJobRepository jobs,
     IBulkNotificationCommandPublisher publisher,
-    IOptions<BulkNotificationOptions> options,
+    BulkNotificationSettings settings,
     TimeProvider timeProvider,
     ILogger<BulkNotificationJobService> logger) : IBulkNotificationJobService
 {
@@ -25,16 +23,15 @@ public sealed class BulkNotificationJobService(
             throw new RequestValidationException("At least one notification is required.");
         }
 
-        if (request.Notifications.Count > options.Value.MaxBatchSize)
+        if (request.Notifications.Count > settings.MaxBatchSize)
         {
             throw new RequestValidationException(
-                $"A bulk notification job cannot contain more than {options.Value.MaxBatchSize} notifications.");
+                $"A bulk notification job cannot contain more than {settings.MaxBatchSize} notifications.");
         }
 
         await RemoveExpiredJobsAsync(cancellationToken);
-        var activeJobCount = await dbContext.BulkNotificationJobs
-            .CountAsync(job => !BulkNotificationJobStatuses.Terminal.Contains(job.Status), cancellationToken);
-        if (activeJobCount >= options.Value.MaxTrackedJobs)
+        var activeJobCount = await jobs.CountActiveAsync(cancellationToken);
+        if (activeJobCount >= settings.MaxTrackedJobs)
         {
             throw new BulkNotificationCapacityException(
                 "The bulk notification service is at capacity. Try again later.");
@@ -65,8 +62,8 @@ public sealed class BulkNotificationJobService(
             }).ToList()
         };
 
-        dbContext.BulkNotificationJobs.Add(job);
-        await dbContext.SaveChangesAsync(cancellationToken);
+        jobs.Add(job);
+        await jobs.SaveChangesAsync(cancellationToken);
 
         var command = new BulkNotificationRequestedV1(
             BulkNotificationRequestedV1.CurrentSchemaVersion,
@@ -87,7 +84,7 @@ public sealed class BulkNotificationJobService(
 
             try
             {
-                await dbContext.SaveChangesAsync(CancellationToken.None);
+                await jobs.SaveChangesAsync(CancellationToken.None);
             }
             catch (Exception statusException)
             {
@@ -114,25 +111,21 @@ public sealed class BulkNotificationJobService(
     public async Task<BulkNotificationJobDto?> GetStatusAsync(Guid jobId, CancellationToken cancellationToken)
     {
         await RemoveExpiredJobsAsync(cancellationToken);
-        var job = await dbContext.BulkNotificationJobs
-            .AsNoTracking()
-            .SingleOrDefaultAsync(candidate => candidate.Id == jobId, cancellationToken);
+        var job = await jobs.GetByIdAsync(jobId, cancellationToken);
         return job is null ? null : ToDto(job);
     }
 
     private async Task RemoveExpiredJobsAsync(CancellationToken cancellationToken)
     {
-        var cutoff = timeProvider.GetUtcNow().AddMinutes(-options.Value.CompletedJobRetentionMinutes);
-        var expired = await dbContext.BulkNotificationJobs
-            .Where(job => job.CompletedAtUtc != null && job.CompletedAtUtc < cutoff)
-            .ToListAsync(cancellationToken);
+        var cutoff = timeProvider.GetUtcNow().AddMinutes(-settings.CompletedJobRetentionMinutes);
+        var expired = await jobs.GetCompletedBeforeAsync(cutoff, cancellationToken);
         if (expired.Count == 0)
         {
             return;
         }
 
-        dbContext.BulkNotificationJobs.RemoveRange(expired);
-        await dbContext.SaveChangesAsync(cancellationToken);
+        jobs.RemoveRange(expired);
+        await jobs.SaveChangesAsync(cancellationToken);
     }
 
     internal static BulkNotificationJobDto ToDto(BulkNotificationJob job) =>

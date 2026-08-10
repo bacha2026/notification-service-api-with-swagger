@@ -1,6 +1,6 @@
 # ADR 002: Process Bulk Notifications Asynchronously
 
-**Status:** Superseded by ADR 003
+**Status:** 
 
 ## Context
 

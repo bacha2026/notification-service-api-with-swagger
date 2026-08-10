@@ -2,11 +2,12 @@ using NSA.Application.Abstractions;
 using NSA.Application.Contracts;
 using NSA.Application.Exceptions;
 using NSA.Domain.Entities;
-using NSA.Persistence.Interfaces;
 
 namespace NSA.Service;
 
-public sealed class NotificationService(INotificationRepository notificationRepository) : INotificationService
+public sealed class NotificationService(
+    INotificationRepository notificationRepository,
+    TimeProvider timeProvider) : INotificationService
 {
     public async Task<IReadOnlyList<NotificationDto>> GetNotificationsAsync(string? recipientEmail, int? orderId, CancellationToken cancellationToken)
     {
@@ -23,7 +24,13 @@ public sealed class NotificationService(INotificationRepository notificationRepo
     public async Task<NotificationDto> CreateNotificationAsync(CreateNotificationRequest request, CancellationToken cancellationToken)
     {
         await ValidateOrderAsync(request.OrderId, cancellationToken);
-        var notification = Notification.Create(request.RecipientEmail, request.Channel, request.Subject, request.Body, request.OrderId, DateTimeOffset.UtcNow);
+        var notification = Notification.Create(
+            request.RecipientEmail,
+            request.Channel,
+            request.Subject,
+            request.Body,
+            request.OrderId,
+            timeProvider.GetUtcNow());
 
         notificationRepository.Add(notification);
         await notificationRepository.SaveChangesAsync(cancellationToken);

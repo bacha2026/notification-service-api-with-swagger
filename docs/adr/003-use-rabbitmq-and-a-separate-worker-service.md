@@ -1,6 +1,6 @@
 # ADR 003: Use RabbitMQ and a Separate WorkerService
 
-**Status:** Accepted
+**Status:**
 
 ## Context
 
