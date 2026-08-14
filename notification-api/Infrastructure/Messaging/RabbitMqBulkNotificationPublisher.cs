@@ -1,5 +1,5 @@
 using System.Text.Json;
-using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Configuration;
 using NSA.Application.Abstractions;
 using NSA.Application.Contracts;
 using RabbitMQ.Client;
@@ -7,7 +7,7 @@ using RabbitMQ.Client;
 namespace NSA.Infrastructure.Messaging;
 
 public sealed class RabbitMqBulkNotificationPublisher(
-    IOptions<RabbitMqOptions> options,
+    IConfiguration configuration,
     RabbitMqPublishResiliencePolicyProvider resiliencePolicies,
     ILogger<RabbitMqBulkNotificationPublisher> logger) : IBulkNotificationCommandPublisher, IAsyncDisposable
 {
@@ -39,8 +39,8 @@ public sealed class RabbitMqBulkNotificationPublisher(
                 {
                     await EnsureChannelAsync(token);
                     await channel!.BasicPublishAsync(
-                        options.Value.CommandExchange,
-                        options.Value.CommandRoutingKey,
+                        RabbitMqConfiguration.GetRequiredString(configuration, "CommandExchange"),
+                        RabbitMqConfiguration.GetRequiredString(configuration, "CommandRoutingKey"),
                         mandatory: true,
                         basicProperties: properties,
                         body: body,
@@ -87,14 +87,14 @@ public sealed class RabbitMqBulkNotificationPublisher(
         }
 
         await ResetAsync();
-        var factory = RabbitMqConnectionFactory.Create(options.Value);
+        var factory = RabbitMqConnectionFactory.Create(configuration);
         connection = await factory.CreateConnectionAsync("nsa-api-publisher", cancellationToken);
         channel = await connection.CreateChannelAsync(
             new CreateChannelOptions(
                 publisherConfirmationsEnabled: true,
                 publisherConfirmationTrackingEnabled: true),
             cancellationToken);
-        await RabbitMqTopology.DeclareAsync(channel, options.Value, cancellationToken);
+        await RabbitMqTopology.DeclareAsync(channel, configuration, cancellationToken);
     }
 
     private async Task ResetAsync()

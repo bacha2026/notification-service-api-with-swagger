@@ -2,10 +2,12 @@ FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /src
 
 COPY notification-api/NSA.csproj notification-api/
+COPY notification.worker.shared/NSA.Worker.Shared.csproj notification.worker.shared/
 COPY notification.worker/NSA.Worker.csproj notification.worker/
 RUN dotnet restore "notification.worker/NSA.Worker.csproj"
 
 COPY notification-api/ notification-api/
+COPY notification.worker.shared/ notification.worker.shared/
 COPY notification.worker/ notification.worker/
 RUN dotnet publish "notification.worker/NSA.Worker.csproj" \
     --configuration Release \

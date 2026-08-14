@@ -1,7 +1,8 @@
 using NSA.Domain.Entities;
 
-namespace NSA.Persistence.Interfaces;
+namespace NSA.Application.Abstractions;
 
+/// <summary>Persistence port required by product use cases.</summary>
 public interface IProductRepository
 {
     Task<IReadOnlyList<Product>> GetAllAsync(CancellationToken cancellationToken);

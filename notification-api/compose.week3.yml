@@ -108,11 +108,38 @@ services:
       start_period: 10s
     restart: unless-stopped
 
+  dlq-recovery-worker:
+    build:
+      context: ..
+      dockerfile: notification-api/Dockerfile.dlq-worker
+    environment:
+      ConnectionStrings__NotificationDb: >-
+        Server=sqlserver,1433;Database=NotificationServiceDb;User Id=sa;Password=${WEEK3_SQL_PASSWORD:?Set WEEK3_SQL_PASSWORD in .env first};Encrypt=False;TrustServerCertificate=True;MultipleActiveResultSets=true;Connect Timeout=2;ConnectRetryCount=0
+      RabbitMq__HostName: rabbitmq
+      RabbitMq__UserName: "${WEEK3_RABBITMQ_USERNAME:?Set WEEK3_RABBITMQ_USERNAME in .env first}"
+      RabbitMq__Password: "${WEEK3_RABBITMQ_PASSWORD:?Set WEEK3_RABBITMQ_PASSWORD in .env first}"
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    networks:
+      - week3
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/nsa-dlq-recovery-worker-ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
 volumes:
   sqlserver-data:
-    name: nsa-week3-sqlserver-data-v2
+    name: nsa-week3-sqlserver-data-v3
   rabbitmq-data:
-    name: nsa-week3-rabbitmq-data-v2
+    name: nsa-week3-rabbitmq-data-v3
 
 networks:
   week3:

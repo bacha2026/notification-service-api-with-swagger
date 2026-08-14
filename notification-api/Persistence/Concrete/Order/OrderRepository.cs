@@ -1,6 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using NSA.Application.Abstractions;
 using NSA.Domain.Entities;
-using NSA.Persistence.Interfaces;
 
 namespace NSA.Persistence.Concrete;
 

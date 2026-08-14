@@ -2,13 +2,14 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Options;
 using NSA.Application.Abstractions;
+using NSA.Application.Configuration;
 using NSA.Application.Contracts;
 using NSA.Application.Exceptions;
 using NSA.Domain.Entities;
 using NSA.Domain.Enums;
 using NSA.Persistence;
+using NSA.Persistence.Concrete;
 using NSA.Service;
 
 namespace NSA.Tests;
@@ -269,14 +270,12 @@ public sealed class BulkNotificationJobServiceTests
         int completedRetentionMinutes = 60,
         TimeProvider? timeProvider = null) =>
         new(
-            context,
+            new BulkNotificationJobRepository(context),
             publisher,
-            Options.Create(new BulkNotificationOptions
-            {
-                MaxTrackedJobs = maxTrackedJobs,
-                MaxBatchSize = maxBatchSize,
-                CompletedJobRetentionMinutes = completedRetentionMinutes
-            }),
+            new BulkNotificationSettings(
+                maxTrackedJobs,
+                maxBatchSize,
+                completedRetentionMinutes),
             timeProvider ?? TimeProvider.System,
             NullLogger<BulkNotificationJobService>.Instance);
 

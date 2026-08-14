@@ -1,7 +1,6 @@
 using NSA.Application.Abstractions;
 using NSA.Application.Contracts;
 using NSA.Domain.Entities;
-using NSA.Persistence.Interfaces;
 
 namespace NSA.Service;
 

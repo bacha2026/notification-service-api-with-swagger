@@ -1,11 +1,14 @@
 using NSA.Application.Abstractions;
+using NSA.Application.Configuration;
 using NSA.Application.Contracts;
 using NSA.Domain.Entities;
-using NSA.Persistence.Interfaces;
 
 namespace NSA.Service;
 
-public sealed class CartService(ICartRepository cartRepository, IConfiguration configuration) : ICartService
+public sealed class CartService(
+    ICartRepository cartRepository,
+    NotificationRecipientSettings recipientSettings,
+    TimeProvider timeProvider) : ICartService
 {
     public Task<CartDto> GetCartAsync(string visitorEmail, CancellationToken cancellationToken)
     {
@@ -24,11 +27,15 @@ public sealed class CartService(ICartRepository cartRepository, IConfiguration c
         var cartItem = await cartRepository.GetByVisitorAndProductAsync(visitorEmail, request.ProductId, cancellationToken);
         if (cartItem is null)
         {
-            cartRepository.Add(CartItem.Create(visitorEmail, request.ProductId, request.Quantity, DateTimeOffset.UtcNow));
+            cartRepository.Add(CartItem.Create(
+                visitorEmail,
+                request.ProductId,
+                request.Quantity,
+                timeProvider.GetUtcNow()));
         }
         else
         {
-            cartItem.AddQuantity(request.Quantity, DateTimeOffset.UtcNow);
+            cartItem.AddQuantity(request.Quantity, timeProvider.GetUtcNow());
         }
 
         await cartRepository.SaveChangesAsync(cancellationToken);
@@ -43,7 +50,7 @@ public sealed class CartService(ICartRepository cartRepository, IConfiguration c
             return null;
         }
 
-        cartItem.UpdateQuantity(request.Quantity, DateTimeOffset.UtcNow);
+        cartItem.UpdateQuantity(request.Quantity, timeProvider.GetUtcNow());
         await cartRepository.SaveChangesAsync(cancellationToken);
         return await BuildCartDtoAsync(cartItem.VisitorEmail, cancellationToken);
     }
@@ -73,11 +80,7 @@ public sealed class CartService(ICartRepository cartRepository, IConfiguration c
         return new CartDto(resolvedEmail, itemDtos, itemDtos.Sum(item => item.Subtotal));
     }
 
-    private string ResolveVisitorEmail(string visitorEmail)
-    {
-        return string.IsNullOrWhiteSpace(visitorEmail)
-            ? configuration["NotificationEmails:DefaultVisitorEmail"] ?? "visitor@example.test"
-            : visitorEmail.Trim();
-    }
+    private string ResolveVisitorEmail(string visitorEmail) =>
+        recipientSettings.ResolveVisitorEmail(visitorEmail);
 
 }

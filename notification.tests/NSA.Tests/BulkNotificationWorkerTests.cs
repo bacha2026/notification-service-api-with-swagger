@@ -1,6 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Options;
 using NSA.Application.Abstractions;
 using NSA.Application.Contracts;
 using NSA.Application.Exceptions;
@@ -8,6 +8,7 @@ using NSA.Domain.Entities;
 using NSA.Domain.Enums;
 using NSA.Infrastructure.Messaging;
 using NSA.Persistence;
+using NSA.Persistence.Concrete;
 using NSA.Service;
 
 namespace NSA.Tests;
@@ -54,7 +55,7 @@ public sealed class BulkNotificationProcessorTests
 
         var disposition = await processor.ProcessAsync(job.Id, CancellationToken.None);
 
-        Assert.Equal(BulkNotificationProcessDisposition.Acknowledge, disposition);
+        Assert.Equal(BulkNotificationProcessingResult.Completed, disposition);
         Assert.Equal(BulkNotificationJobStatuses.Completed, job.Status);
         Assert.Equal(1, job.ProcessedCount);
         Assert.Equal(new[] { "ambiguous-confirm" }, dispatcher.Subjects);
@@ -76,7 +77,7 @@ public sealed class BulkNotificationProcessorTests
 
         var disposition = await processor.ProcessAsync(job.Id, CancellationToken.None);
 
-        Assert.Equal(BulkNotificationProcessDisposition.DeadLetter, disposition);
+        Assert.Equal(BulkNotificationProcessingResult.AlreadyDeadLettered, disposition);
         Assert.Empty(dispatcher.Subjects);
     }
 
@@ -201,9 +202,15 @@ public sealed class BulkNotificationProcessorTests
         INotificationService dispatcher,
         string? failureInjectionSubject = null) =>
         new(
-            context,
+            new BulkNotificationJobRepository(context),
             dispatcher,
-            Options.Create(new RabbitMqOptions { FailureInjectionSubject = failureInjectionSubject }),
+            new ConfiguredBulkNotificationFailureInjector(
+                new ConfigurationBuilder()
+                    .AddInMemoryCollection(new Dictionary<string, string?>
+                    {
+                        ["RabbitMq:FailureInjectionSubject"] = failureInjectionSubject
+                    })
+                    .Build()),
             TimeProvider.System,
             NullLogger<BulkNotificationProcessor>.Instance);
 
@@ -267,6 +274,11 @@ public sealed class BulkNotificationProcessorTests
             throw new NotSupportedException();
 
         public Task<bool> DeleteNotificationAsync(int id, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public Task<int> DeleteNotificationsForVisitorAsync(
+            string visitorEmail,
+            CancellationToken cancellationToken) =>
             throw new NotSupportedException();
     }
 }

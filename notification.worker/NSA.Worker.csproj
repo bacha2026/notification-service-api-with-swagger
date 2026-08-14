@@ -13,6 +13,23 @@
 
   <ItemGroup>
     <ProjectReference Include="../notification-api/NSA.csproj" />
+    <ProjectReference Include="../notification.worker.shared/NSA.Worker.Shared.csproj" />
   </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="../notification.worker.shared/appsettings.json">
+      <Link>appsettings.json</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+
+  <!-- NSA is a code dependency, but its Web-host settings must not replace the
+       worker defaults linked above when this executable is published. -->
+  <Target Name="RemoveApiHostSettingsFromWorkerPublish" AfterTargets="ComputeFilesToPublish">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)/../notification-api/appsettings.json'))" />
+    </ItemGroup>
+  </Target>
 
 </Project>

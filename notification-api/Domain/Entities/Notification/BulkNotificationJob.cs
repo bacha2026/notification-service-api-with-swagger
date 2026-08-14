@@ -11,6 +11,7 @@ public static class BulkNotificationJobStatuses
     public const string CompletedWithErrors = "CompletedWithErrors";
     public const string PublishFailed = "PublishFailed";
     public const string DeadLettered = "DeadLettered";
+    public const string RecoveryPending = "RecoveryPending";
 
     public static readonly string[] Terminal =
     [

@@ -9,20 +9,36 @@ namespace NSA.Service;
 public sealed class BulkNotificationJobNotFoundException(Guid jobId)
     : Exception($"Bulk notification job {jobId} does not exist.");
 
-public enum BulkNotificationProcessResult
+/// <summary>Business outcome of processing a persisted notification job.</summary>
+public enum BulkNotificationProcessingResult
 {
     Completed,
     AlreadyDeadLettered
 }
 
-public sealed class BulkNotificationProcessor(
-    IBulkNotificationJobRepository jobs,
-    INotificationService notificationService,
-    IBulkNotificationFailureInjector failureInjector,
-    TimeProvider timeProvider,
-    ILogger<BulkNotificationProcessor> logger)
+public sealed class BulkNotificationProcessor
 {
-    public async Task<BulkNotificationProcessResult> ProcessAsync(
+    private readonly IBulkNotificationJobRepository jobs;
+    private readonly INotificationService notificationService;
+    private readonly IBulkNotificationFailureInjector failureInjector;
+    private readonly TimeProvider timeProvider;
+    private readonly ILogger<BulkNotificationProcessor> logger;
+
+    public BulkNotificationProcessor(
+        IBulkNotificationJobRepository jobs,
+        INotificationService notificationService,
+        IBulkNotificationFailureInjector failureInjector,
+        TimeProvider timeProvider,
+        ILogger<BulkNotificationProcessor> logger)
+    {
+        this.jobs = jobs ?? throw new ArgumentNullException(nameof(jobs));
+        this.notificationService = notificationService ?? throw new ArgumentNullException(nameof(notificationService));
+        this.failureInjector = failureInjector ?? throw new ArgumentNullException(nameof(failureInjector));
+        this.timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
+        this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+
+    public async Task<BulkNotificationProcessingResult> ProcessAsync(
         Guid jobId,
         CancellationToken cancellationToken)
     {
@@ -32,23 +48,23 @@ public sealed class BulkNotificationProcessor(
         if (job.Status == BulkNotificationJobStatuses.DeadLettered)
         {
             logger.LogInformation(
-                "Bulk notification job {JobId} is already dead-lettered; rejecting a redelivered command to the DLQ.",
+                "Bulk notification job {JobId} is already dead-lettered and cannot be processed again.",
                 job.Id);
-            return BulkNotificationProcessResult.AlreadyDeadLettered;
+            return BulkNotificationProcessingResult.AlreadyDeadLettered;
         }
 
         if (job.Status is BulkNotificationJobStatuses.Completed
             or BulkNotificationJobStatuses.CompletedWithErrors)
         {
             logger.LogInformation(
-                "Bulk notification job {JobId} is already terminal with status {Status}; acknowledging duplicate command.",
+                "Bulk notification job {JobId} is already terminal with status {Status}; duplicate delivery requires no processing.",
                 job.Id,
                 job.Status);
-            return BulkNotificationProcessResult.Completed;
+            return BulkNotificationProcessingResult.Completed;
         }
 
-        // A publish failure can be ambiguous: RabbitMQ may have accepted a command
-        // before the confirm connection was lost. If that command arrives, it is the
+        // A publish failure can be ambiguous: a command may have been accepted
+        // before the confirmation connection was lost. If it arrives, it is the
         // proof needed to recover the persisted job instead of discarding valid work.
         var recoveringAmbiguousPublish = job.Status == BulkNotificationJobStatuses.PublishFailed;
 
@@ -110,7 +126,7 @@ public sealed class BulkNotificationProcessor(
             ? null
             : "One or more notifications could not be processed.";
         await jobs.SaveChangesAsync(cancellationToken);
-        return BulkNotificationProcessResult.Completed;
+        return BulkNotificationProcessingResult.Completed;
     }
 
     public async Task RecordRetryAsync(

@@ -1,10 +1,10 @@
 using Microsoft.Extensions.Diagnostics.HealthChecks;
-using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Configuration;
 using NSA.Infrastructure.Messaging;
 
 namespace NSA.Infrastructure.Health;
 
-public sealed class RabbitMqReadinessHealthCheck(IOptions<RabbitMqOptions> options) : IHealthCheck
+public sealed class RabbitMqReadinessHealthCheck(IConfiguration configuration) : IHealthCheck
 {
     public async Task<HealthCheckResult> CheckHealthAsync(
         HealthCheckContext context,
@@ -12,7 +12,7 @@ public sealed class RabbitMqReadinessHealthCheck(IOptions<RabbitMqOptions> optio
     {
         try
         {
-            var factory = RabbitMqConnectionFactory.Create(options.Value);
+            var factory = RabbitMqConnectionFactory.Create(configuration);
             await using var connection = await factory.CreateConnectionAsync(
                 "nsa-api-readiness",
                 cancellationToken);

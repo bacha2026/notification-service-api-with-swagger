@@ -1,7 +1,8 @@
 using NSA.Domain.Entities;
 
-namespace NSA.Persistence.Interfaces;
+namespace NSA.Application.Abstractions;
 
+/// <summary>Persistence port required by order use cases.</summary>
 public interface IOrderRepository
 {
     Task<IReadOnlyList<Order>> GetOrdersForVisitorAsync(string visitorEmail, CancellationToken cancellationToken);

@@ -135,5 +135,10 @@ public sealed class ApiExceptionContractTests
 
         public Task<bool> DeleteNotificationAsync(int id, CancellationToken cancellationToken) =>
             throw new NotSupportedException();
+
+        public Task<int> DeleteNotificationsForVisitorAsync(
+            string visitorEmail,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
     }
 }

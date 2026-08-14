@@ -1,24 +1,20 @@
-using Microsoft.EntityFrameworkCore;
 using NSA.Application.Abstractions;
 using NSA.Infrastructure.Messaging;
-using NSA.Persistence;
 using NSA.Persistence.Concrete;
-using NSA.Persistence.Interfaces;
 using NSA.Service;
-using NSA.Worker;
+using NSA.Worker.Consumers;
+using NSA.Worker.Handlers;
+using NSA.Workers.Shared.Hosting;
 
 var builder = Host.CreateApplicationBuilder(args);
 
-builder.Services.AddDbContext<NotificationDbContext>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("NotificationDb")));
+builder.Services.AddNotificationWorkerInfrastructure(builder.Configuration);
 builder.Services.AddScoped<INotificationRepository, NotificationRepository>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
-builder.Services.AddOptions<RabbitMqOptions>()
-    .Bind(builder.Configuration.GetSection(RabbitMqOptions.SectionName))
-    .ValidateDataAnnotations()
-    .ValidateOnStart();
-builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddScoped<IBulkNotificationJobRepository, BulkNotificationJobRepository>();
+builder.Services.AddSingleton<IBulkNotificationFailureInjector, ConfiguredBulkNotificationFailureInjector>();
 builder.Services.AddScoped<BulkNotificationProcessor>();
+builder.Services.AddSingleton<BulkNotificationCommandHandler>();
 builder.Services.AddHostedService<RabbitMqBulkNotificationWorker>();
 
 await builder.Build().RunAsync();

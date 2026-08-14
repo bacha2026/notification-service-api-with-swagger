@@ -5,13 +5,17 @@ using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Options;
 using Microsoft.OpenApi.Models;
 using NSA.Application.Abstractions;
+using NSA.Application.Configuration;
+using NSA.Infrastructure.Configuration;
 using NSA.Infrastructure.Health;
+using NSA.Infrastructure.Hosting;
 using NSA.Infrastructure.Messaging;
+using NSA.Infrastructure.Observability;
 using NSA.Persistence;
 using NSA.Persistence.Concrete;
-using NSA.Persistence.Interfaces;
 using NSA.Presentation.ExceptionHandling;
 using NSA.Presentation.OpenApi;
 using NSA.Service;
@@ -96,6 +100,7 @@ builder.Services.AddScoped<ICartRepository, CartRepository>();
 builder.Services.AddScoped<INotificationRepository, NotificationRepository>();
 builder.Services.AddScoped<IOrderRepository, OrderRepository>();
 builder.Services.AddScoped<IProductRepository, ProductRepository>();
+builder.Services.AddScoped<IBulkNotificationJobRepository, BulkNotificationJobRepository>();
 builder.Services.AddScoped<ICartService, CartService>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
 builder.Services.AddScoped<IOrderService, OrderService>();
@@ -104,16 +109,38 @@ builder.Services.AddOptions<BulkNotificationOptions>()
     .Bind(builder.Configuration.GetSection(BulkNotificationOptions.SectionName))
     .ValidateDataAnnotations()
     .ValidateOnStart();
-builder.Services.AddSingleton(TimeProvider.System);
-builder.Services.AddOptions<RabbitMqOptions>()
-    .Bind(builder.Configuration.GetSection(RabbitMqOptions.SectionName))
+builder.Services.AddOptions<NotificationRecipientOptions>()
+    .Bind(builder.Configuration.GetSection(NotificationRecipientOptions.SectionName))
     .ValidateDataAnnotations()
     .ValidateOnStart();
+builder.Services.AddSingleton(serviceProvider =>
+{
+    var options = serviceProvider.GetRequiredService<IOptions<BulkNotificationOptions>>().Value;
+    return new BulkNotificationSettings(
+        options.MaxTrackedJobs,
+        options.MaxBatchSize,
+        options.CompletedJobRetentionMinutes);
+});
+builder.Services.AddSingleton(serviceProvider =>
+{
+    var options = serviceProvider.GetRequiredService<IOptions<NotificationRecipientOptions>>().Value;
+    return new NotificationRecipientSettings(options.AdminEmail, options.DefaultVisitorEmail);
+});
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton<IApplicationStopping, HostApplicationStopping>();
+builder.Services.AddSingleton<ICorrelationIdProvider, ActivityCorrelationIdProvider>();
+RabbitMqConfiguration.Validate(builder.Configuration);
 builder.Services.AddSingleton<RabbitMqPublishResiliencePolicyProvider>();
 builder.Services.AddSingleton<RabbitMqBulkNotificationPublisher>();
+builder.Services.AddSingleton<IBulkNotificationFailureInjector, ConfiguredBulkNotificationFailureInjector>();
 builder.Services.AddSingleton<IBulkNotificationCommandPublisher>(serviceProvider =>
     serviceProvider.GetRequiredService<RabbitMqBulkNotificationPublisher>());
-builder.Services.AddScoped<IBulkNotificationJobService, BulkNotificationJobService>();
+builder.Services.AddScoped<IBulkNotificationJobService>(serviceProvider => new BulkNotificationJobService(
+    serviceProvider.GetRequiredService<IBulkNotificationJobRepository>(),
+    serviceProvider.GetRequiredService<IBulkNotificationCommandPublisher>(),
+    serviceProvider.GetRequiredService<BulkNotificationSettings>(),
+    serviceProvider.GetRequiredService<TimeProvider>(),
+    serviceProvider.GetRequiredService<ILogger<BulkNotificationJobService>>()));
 
 var app = builder.Build();
 

@@ -25,21 +25,22 @@
 
 ## Week 3 messaging and deployment acceptance
 
-- The API and `NSA.Worker` are separate executable projects and are both included in the root solution build.
+- The API, `NSA.Worker`, and `NSA.Dlq.Worker` are separate executable projects and are included in the root solution build.
 - Bulk jobs and items are persisted in SQL Server before publication; status is read from SQL and remains queryable independently of the worker process.
 - The API publishes a persistent, versioned RabbitMQ command with publisher-confirmation tracking and returns `202 Accepted` only after the broker accepts the command.
 - Broker commands contain stable job/message/correlation identifiers and timestamps, but no recipient address, subject, or body.
-- RabbitMQ declares a durable direct exchange, durable quorum command queue, dead-letter exchange, and durable quorum DLQ with stable names.
+- RabbitMQ declares durable command, dead-letter, recovery-delay, and parking exchanges/queues with stable names.
 - The WorkerService uses manual acknowledgement and acknowledges successful work only after durable SQL progress is saved.
 - Retryable command failures are bounded to three application attempts; exhausted commands and non-retryable malformed, unsupported-schema, or wrong-type commands reach the named DLQ.
 - Duplicate commands for completed jobs are acknowledged without replay; commands for already dead-lettered jobs are rejected back to the DLQ.
-- The four-service Docker Compose stack starts SQL Server, RabbitMQ Management, API, and WorkerService with named volumes, a named network, dependency health checks, ignored local credentials, and loopback-only host ports.
+- The DLQ Recovery Worker only replays commands explicitly rejected from the main queue. It marks a matching SQL job `RecoveryPending`, clears the exhausted application retry header, publish-confirms to the recovery queue, and then acknowledges the DLQ delivery. Malformed, unknown, non-rejected, and replay-limit-exhausted messages are parked durably.
+- The five-service Docker Compose stack starts SQL Server, RabbitMQ Management, API, WorkerService, and DLQ Recovery Worker with named volumes, a named network, dependency health checks, ignored local credentials, and loopback-only host ports.
 - `/health/live` is process-only. `/health/ready` verifies both SQL Server and RabbitMQ with bounded timeouts. Worker readiness requires an active consumer and recent SQL connectivity.
 - Runtime evidence covers happy completion, worker stop-before-ack redelivery, broker reconnection, in-flight broker restart, publish failure, malformed/schema/type rejection, bounded poison handling, identifier correlation, and DLQ inspection.
 
 ## Week 4–6 compatibility boundaries
 
-- Week 3 is explicitly at-least-once. Transactional Outbox publication, Inbox/deduplication, `X-Idempotency-Key`, stable provider idempotency, and automatic replay are not claimed until Week 4.
+- The stack is explicitly at-least-once. Transactional Outbox publication, Inbox/deduplication, `X-Idempotency-Key`, stable provider idempotency, and full reconciliation are not claimed.
 - Public contracts and versioned broker messages evolve additively; database changes use expand/contract rules so old and new deployment colors can overlap safely.
 - API and worker remain stateless apart from SQL/RabbitMQ state, expose dependency-aware readiness, and keep secrets in configuration seams suitable for later Vault integration.
 - The `Projects` workspace is the Git root, so the API, Worker, tests, documentation, Next.js, and Angular applications can share one CI checkout.

@@ -1,5 +1,5 @@
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Options;
 using NSA.Infrastructure.Messaging;
 using Polly.CircuitBreaker;
 
@@ -7,6 +7,22 @@ namespace NSA.Tests;
 
 public sealed class RabbitMqPublishResilienceTests
 {
+    [Fact]
+    public void RabbitMq_configuration_validation_rejects_missing_required_values()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["RabbitMq:HostName"] = "localhost"
+            })
+            .Build();
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            RabbitMqConfiguration.Validate(configuration));
+
+        Assert.Contains("RabbitMq:UserName", exception.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task Transient_publish_failure_is_retried_and_can_recover()
     {
@@ -60,12 +76,14 @@ public sealed class RabbitMqPublishResilienceTests
 
     private static Polly.IAsyncPolicy CreatePolicy(int retryCount, int breakerFailures) =>
         new RabbitMqPublishResiliencePolicyProvider(
-            Options.Create(new RabbitMqOptions
-            {
-                PublishRetryCount = retryCount,
-                InitialPublishRetryDelayMilliseconds = 1,
-                PublishCircuitBreakerFailures = breakerFailures,
-                PublishCircuitBreakDurationSeconds = 30
-            }),
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["RabbitMq:PublishRetryCount"] = retryCount.ToString(),
+                    ["RabbitMq:InitialPublishRetryDelayMilliseconds"] = "1",
+                    ["RabbitMq:PublishCircuitBreakerFailures"] = breakerFailures.ToString(),
+                    ["RabbitMq:PublishCircuitBreakDurationSeconds"] = "30"
+                })
+                .Build(),
             NullLogger<RabbitMqBulkNotificationPublisher>.Instance).Policy;
 }

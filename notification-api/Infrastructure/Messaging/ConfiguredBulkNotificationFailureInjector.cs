@@ -1,16 +1,16 @@
-using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Configuration;
 using NSA.Application.Abstractions;
 using NSA.Domain.Entities;
 
 namespace NSA.Infrastructure.Messaging;
 
 /// <summary>Local-demo-only adapter that turns a configured subject into a processing failure.</summary>
-public sealed class ConfiguredBulkNotificationFailureInjector(IOptions<RabbitMqOptions> options)
+public sealed class ConfiguredBulkNotificationFailureInjector(IConfiguration configuration)
     : IBulkNotificationFailureInjector
 {
     public void ThrowIfTriggered(BulkNotificationJob job)
     {
-        var failureInjectionSubject = options.Value.FailureInjectionSubject;
+        var failureInjectionSubject = RabbitMqConfiguration.GetOptionalString(configuration, "FailureInjectionSubject");
         if (!string.IsNullOrWhiteSpace(failureInjectionSubject)
             && job.Items.Any(item =>
                 item.Status == BulkNotificationItemStatuses.Pending

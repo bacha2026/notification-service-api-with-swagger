@@ -1,8 +1,6 @@
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
 using NSA.Application.Exceptions;
-using Polly.CircuitBreaker;
-using Polly.Timeout;
 
 namespace NSA.Presentation.ExceptionHandling;
 
@@ -22,8 +20,6 @@ public sealed class ApiExceptionHandler(
             RequestValidationException => StatusCodes.Status400BadRequest,
             ServiceUnavailableException => StatusCodes.Status503ServiceUnavailable,
             HttpRequestException => StatusCodes.Status503ServiceUnavailable,
-            BrokenCircuitException => StatusCodes.Status503ServiceUnavailable,
-            TimeoutRejectedException => StatusCodes.Status503ServiceUnavailable,
             TaskCanceledException => StatusCodes.Status503ServiceUnavailable,
             _ => StatusCodes.Status500InternalServerError
         };

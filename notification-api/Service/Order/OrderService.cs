@@ -1,10 +1,9 @@
-using System.Diagnostics;
 using NSA.Application.Abstractions;
+using NSA.Application.Configuration;
 using NSA.Application.Contracts;
 using NSA.Application.Exceptions;
 using NSA.Domain.Entities;
 using NSA.Domain.Enums;
-using NSA.Persistence.Interfaces;
 
 namespace NSA.Service;
 
@@ -12,8 +11,10 @@ public sealed class OrderService(
     IOrderRepository orderRepository,
     INotificationService notificationService,
     IBulkNotificationJobService bulkNotificationJobs,
-    IHostApplicationLifetime applicationLifetime,
-    IConfiguration configuration,
+    NotificationRecipientSettings recipientSettings,
+    IApplicationStopping applicationStopping,
+    ICorrelationIdProvider correlationIdProvider,
+    TimeProvider timeProvider,
     ILogger<OrderService> logger) : IOrderService
 {
     private static readonly TimeSpan PostCommitHandoffTimeout = TimeSpan.FromSeconds(15);
@@ -41,7 +42,7 @@ public sealed class OrderService(
             throw new RequestValidationException("The cart is empty.");
         }
 
-        var order = Order.CreateFromCart(visitorEmail, cartItems, DateTimeOffset.UtcNow);
+        var order = Order.CreateFromCart(visitorEmail, cartItems, timeProvider.GetUtcNow());
         orderRepository.Add(order);
         orderRepository.RemoveCartItems(cartItems);
         await orderRepository.SaveChangesAsync(cancellationToken);
@@ -58,7 +59,12 @@ public sealed class OrderService(
             return null;
         }
 
-        order.UpdateStatuses(request.OrderStatus, request.PaymentStatus, request.FulfillmentStatus, request.DeliveryStatus, DateTimeOffset.UtcNow);
+        order.UpdateStatuses(
+            request.OrderStatus,
+            request.PaymentStatus,
+            request.FulfillmentStatus,
+            request.DeliveryStatus,
+            timeProvider.GetUtcNow());
 
         var body = BuildOrderMessage(order);
         await CreateNotificationAsync(AdminEmail, $"Order #{order.Id} status updated", body, order.Id, cancellationToken);
@@ -81,7 +87,7 @@ public sealed class OrderService(
             return null;
         }
 
-        if (!order.CancelByVisitor(DateTimeOffset.UtcNow))
+        if (!order.CancelByVisitor(timeProvider.GetUtcNow()))
         {
             return ToDto(order);
         }
@@ -99,7 +105,7 @@ public sealed class OrderService(
         return ToDto(order);
     }
 
-    private string AdminEmail => configuration["NotificationEmails:AdminEmail"] ?? "admin@example.test";
+    private string AdminEmail => recipientSettings.AdminEmail;
 
     private async Task<(BulkNotificationJobDto? Job, NotificationHandoffStatus Status)>
         QueueOrderPlacedNotificationsSafelyAsync(Order order)
@@ -124,12 +130,12 @@ public sealed class OrderService(
         try
         {
             using var handoffTimeout = CancellationTokenSource.CreateLinkedTokenSource(
-                applicationLifetime.ApplicationStopping);
+                applicationStopping.StoppingToken);
             handoffTimeout.CancelAfter(PostCommitHandoffTimeout);
 
             var job = await bulkNotificationJobs.QueueAsync(
                 request,
-                Activity.Current?.Id ?? $"order-{order.Id}",
+                correlationIdProvider.CurrentCorrelationId ?? $"order-{order.Id}",
                 handoffTimeout.Token);
             return (job, NotificationHandoffStatus.Confirmed);
         }
@@ -137,7 +143,7 @@ public sealed class OrderService(
         {
             logger.LogWarning(
                 exception,
-                "Order {OrderId} was saved, but RabbitMQ handoff for notification job {JobId} could not be confirmed",
+                "Order {OrderId} was saved, but notification command handoff for job {JobId} could not be confirmed",
                 order.Id,
                 exception.Job.JobId);
             return (exception.Job, NotificationHandoffStatus.Unconfirmed);
@@ -151,7 +157,7 @@ public sealed class OrderService(
             return (null, NotificationHandoffStatus.Rejected);
         }
         catch (OperationCanceledException exception)
-            when (!applicationLifetime.ApplicationStopping.IsCancellationRequested)
+            when (!applicationStopping.StoppingToken.IsCancellationRequested)
         {
             logger.LogWarning(
                 exception,
@@ -177,12 +183,8 @@ public sealed class OrderService(
                 orderId),
             cancellationToken);
 
-    private string ResolveVisitorEmail(string visitorEmail)
-    {
-        return string.IsNullOrWhiteSpace(visitorEmail)
-            ? configuration["NotificationEmails:DefaultVisitorEmail"] ?? "visitor@example.test"
-            : visitorEmail.Trim();
-    }
+    private string ResolveVisitorEmail(string visitorEmail) =>
+        recipientSettings.ResolveVisitorEmail(visitorEmail);
 
     private static string NormalizeRequiredVisitorEmail(string visitorEmail)
     {

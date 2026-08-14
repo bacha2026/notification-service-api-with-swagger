@@ -1,7 +1,8 @@
 using NSA.Domain.Entities;
 
-namespace NSA.Persistence.Interfaces;
+namespace NSA.Application.Abstractions;
 
+/// <summary>Persistence port required by cart use cases.</summary>
 public interface ICartRepository
 {
     Task<IReadOnlyList<CartItem>> GetCartItemsWithProductsAsync(string visitorEmail, CancellationToken cancellationToken);

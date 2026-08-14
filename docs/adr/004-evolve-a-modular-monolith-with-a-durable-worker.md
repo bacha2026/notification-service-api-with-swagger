@@ -12,7 +12,7 @@ The service also needs repeatable local infrastructure, secure configuration, an
 
 Keep the Notification Service as a modular monolith: one API codebase with clear internal boundaries and a separately deployed `Notification WorkerService`.
 
-The API accepts bulk requests, persists job state, and sends notification commands through RabbitMQ. The worker consumes commands independently, uses bounded retries for transient failures, and sends malformed or exhausted messages to a dead-letter queue (DLQ) for investigation and controlled replay.
+The API accepts bulk requests, persists job state, and sends notification commands through RabbitMQ. The primary worker consumes commands independently, uses bounded retries for transient failures, and sends malformed or exhausted messages to a dead-letter queue (DLQ). A dedicated recovery worker safely redrives only commands explicitly rejected by the primary queue; malformed, unknown, non-rejected, and replay-limit-exhausted commands are retained in a parking queue for investigation.
 
 Introduce reliability and operations in stages:
 
