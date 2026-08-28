@@ -49,7 +49,8 @@ public enum NotificationHandoffStatus
 public sealed record CreateOrderResult(
     OrderDto Order,
     BulkNotificationJobDto? NotificationJob,
-    NotificationHandoffStatus NotificationHandoff);
+    NotificationHandoffStatus NotificationHandoff,
+    bool IdempotencyReplayed = false);
 
 /// <summary>Request to update the lifecycle statuses of an order.</summary>
 public sealed record UpdateOrderStatusRequest

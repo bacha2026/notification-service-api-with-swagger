@@ -25,3 +25,12 @@
 **/.idea/
 .DS_Store
 Thumbs.db
+
+# Generated local infrastructure state and Vault-rendered material
+infra/**/.runtime/
+
+# Local PDF inspection and unreferenced derivative exports
+.codex-pdf-*/
+ADR-Week3-What-Why-How.pdf
+DemonstrationOverview.pdf
+DemonstrationWeek*.pdf

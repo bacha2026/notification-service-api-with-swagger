@@ -1,17 +1,17 @@
 function NotificationSound({ enabled }) {
-  const audioRef = useRef(null);
-
-  // Missing cleanup: replaced audio could keep playing; pausing and clearing the instance releases it when the effect ends.
+  // Missing cleanup: create audio only while enabled, then pause and rewind that
+  // exact instance when enabled changes or the component unmounts.
   useEffect(() => {
+    if (!enabled) return;
+
     const audio = new Audio('/ping.mp3');
-    audioRef.current = audio;
-    if (enabled) {
-      audio.play();
-    }
+    void audio.play().catch(() => {
+      // Autoplay policy may require a prior user interaction.
+    });
 
     return () => {
       audio.pause();
-      audioRef.current = null;
+      audio.currentTime = 0;
     };
   }, [enabled]);
 

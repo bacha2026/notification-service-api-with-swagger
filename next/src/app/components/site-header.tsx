@@ -1,9 +1,22 @@
 "use client";
 
 import Link from "next/link";
+import { useQueryClient } from "@tanstack/react-query";
+import { ChevronDown, LogOut, PackageOpen, UserRound } from "lucide-react";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { LoginDialog } from "@/app/components/auth/login-dialog";
+import { useCurrentUser } from "@/app/components/auth/use-auth";
+import { NotificationBell } from "@/app/components/notifications/notification-bell";
+import { Button } from "@/app/components/ui/button";
+import { Avatar, AvatarFallback, AvatarImage } from "@/app/components/ui/avatar";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/app/components/ui/dropdown-menu";
 import { useStore } from "@/app/components/store-provider";
+import { useAuthStore } from "@/app/lib/auth-store";
 
 const navItems = [
   { href: "/", label: "Home" },
@@ -12,23 +25,6 @@ const navItems = [
   { href: "/about-us", label: "About Us" },
   { href: "/contact-us", label: "Contact Us" },
 ];
-
-function ChevronDownIcon() {
-  return (
-    <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8">
-      <path d="m5.5 7.5 4.5 4.5 4.5-4.5" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-function UserIcon() {
-  return (
-    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.65">
-      <circle cx="12" cy="8" r="3.2" />
-      <path d="M5.5 20c.9-3.1 3.1-4.65 6.5-4.65S17.6 16.9 18.5 20" strokeLinecap="round" />
-    </svg>
-  );
-}
 
 function BagIcon() {
   return (
@@ -39,10 +35,26 @@ function BagIcon() {
   );
 }
 
+function initials(firstName: string, lastName: string) {
+  return `${firstName.slice(0, 1)}${lastName.slice(0, 1)}`.toUpperCase() || "U";
+}
+
 export function SiteHeader() {
   const pathname = usePathname();
-  const [menuOpen, setMenuOpen] = useState(false);
+  const queryClient = useQueryClient();
   const { cartItemCount } = useStore();
+  const session = useAuthStore((state) => state.session);
+  const clearSession = useAuthStore((state) => state.clearSession);
+  const setLoginDialogOpen = useAuthStore((state) => state.setLoginDialogOpen);
+  useCurrentUser();
+
+  const user = session?.user;
+  const displayName = user ? `${user.firstName} ${user.lastName}`.trim() || user.email : "";
+
+  function logOut() {
+    queryClient.removeQueries({ queryKey: ["auth"] });
+    clearSession();
+  }
 
   return (
     <>
@@ -57,31 +69,50 @@ export function SiteHeader() {
             {cartItemCount > 0 && <span className="cart-count">{cartItemCount}</span>}
           </Link>
 
-          <div className="profile-menu">
-            <div className="visitor-avatar" role="img" aria-label="Visitor profile picture">
-              <UserIcon />
-            </div>
-            <button
-              className="profile-toggle"
-              type="button"
-              aria-label="Open visitor menu"
-              aria-expanded={menuOpen}
-              onClick={() => setMenuOpen((open) => !open)}
+          {user ? (
+            <>
+              <NotificationBell />
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    className="h-10 gap-2 rounded-full px-1.5 pr-2 text-[#f8f6ef] hover:bg-white/10 hover:text-white"
+                    aria-label={`Open ${displayName}'s account menu`}
+                  >
+                    <Avatar className="size-8 border border-white/35">
+                      {user.photoUrl && <AvatarImage src={user.photoUrl} alt={`${displayName}'s profile`} referrerPolicy="no-referrer" />}
+                      <AvatarFallback>{initials(user.firstName, user.lastName)}</AvatarFallback>
+                    </Avatar>
+                    <span className="hidden max-w-36 truncate text-sm font-semibold sm:inline">{displayName}</span>
+                    <ChevronDown className="size-4" aria-hidden="true" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <div className="border-b border-[#e8e5dc] px-2 py-2">
+                    <p className="truncate text-sm font-semibold">{displayName}</p>
+                    <p className="truncate text-xs text-[#69716a]">{user.email}</p>
+                  </div>
+                  <DropdownMenuItem asChild>
+                    <Link href="/order"><PackageOpen className="mr-2 size-4" />My orders</Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link href="/order"><UserRound className="mr-2 size-4" />Account</Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem className="text-[#8b3d37] focus:bg-red-50 focus:text-[#8b3d37]" onSelect={logOut}>
+                    <LogOut className="mr-2 size-4" />Log out
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </>
+          ) : (
+            <Button
+              variant="ghost"
+              className="h-9 rounded-md px-3 text-sm font-semibold text-[#f8f6ef] hover:bg-white/10 hover:text-white"
+              onClick={() => setLoginDialogOpen(true)}
             >
-              <ChevronDownIcon />
-            </button>
-
-            {menuOpen && (
-              <div className="profile-dropdown" role="menu">
-                <button type="button" role="menuitem" onClick={() => setMenuOpen(false)}>
-                  Settings
-                </button>
-                <button type="button" role="menuitem" onClick={() => setMenuOpen(false)}>
-                  Logout
-                </button>
-              </div>
-            )}
-          </div>
+              Login
+            </Button>
+          )}
         </div>
       </header>
 
@@ -102,6 +133,8 @@ export function SiteHeader() {
           })}
         </div>
       </nav>
+
+      {pathname !== "/signup" && <LoginDialog />}
     </>
   );
 }

@@ -1,0 +1,122 @@
+name: Promote immutable release
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish_run_id:
+        description: Workflow run ID that produced the attested release manifest.
+        required: true
+        type: string
+      release_revision:
+        description: Exact 40-character commit SHA recorded by that manifest.
+        required: true
+        type: string
+      observe_seconds:
+        description: Post-cutover observation window (0-120 seconds).
+        required: true
+        default: "10"
+        type: string
+
+permissions:
+  actions: read
+  attestations: read
+  contents: read
+  packages: read
+
+concurrency:
+  group: promotion-production-like
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    name: Gate idle color and switch
+    environment:
+      name: production-like
+    runs-on: [self-hosted, linux, nsa-deployment]
+    timeout-minutes: 30
+    env:
+      EXPECTED_REPOSITORY: ${{ github.repository }}
+      EXPECTED_SOURCE: ${{ github.server_url }}/${{ github.repository }}
+      MANIFEST_PATH: artifacts/promotion-${{ github.run_id }}-${{ github.run_attempt }}/release-manifest.json
+      RELEASE_EVIDENCE_NAMESPACE: promotion-${{ github.run_id }}-${{ github.run_attempt }}
+      REQUESTED_PUBLISH_RUN_ID: ${{ inputs.publish_run_id }}
+      REQUESTED_REVISION: ${{ inputs.release_revision }}
+    steps:
+      - name: Require the trusted main controller ref
+        shell: bash
+        run: |
+          [[ "$GITHUB_REF" == "refs/heads/main" ]] || {
+            echo "Promotion must be dispatched from refs/heads/main." >&2
+            exit 1
+          }
+
+      - name: Check out trusted deployment controller
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: refs/heads/main
+          clean: false # Preserve ignored Vault-rendered secrets and deployment state on this dedicated host.
+
+      - name: Verify the selected trusted publish run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          command -v gh >/dev/null 2>&1 || {
+            echo "GitHub CLI is required on the nsa-deployment runner." >&2
+            exit 1
+          }
+          [[ "$REQUESTED_PUBLISH_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$REQUESTED_REVISION" =~ ^[a-f0-9]{40}$ ]]
+          run_metadata="${RUNNER_TEMP}/publish-run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.json"
+          gh api \
+            "repos/${EXPECTED_REPOSITORY}/actions/runs/${REQUESTED_PUBLISH_RUN_ID}" \
+            > "$run_metadata"
+          node infra/week6/release-control.mjs verify-publish-run \
+            "$run_metadata" "$EXPECTED_REPOSITORY" \
+            "$REQUESTED_PUBLISH_RUN_ID" "$REQUESTED_REVISION"
+
+      - name: Download the release manifest from its trusted publish run
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-manifest-${{ inputs.release_revision }}
+          path: artifacts/promotion-${{ github.run_id }}-${{ github.run_attempt }}
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.publish_run_id }}
+
+      - name: Verify manifest metadata and signed provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          node infra/week6/release-control.mjs verify-published-manifest \
+            "$MANIFEST_PATH" "$EXPECTED_SOURCE" "$EXPECTED_REPOSITORY" \
+            "$REQUESTED_PUBLISH_RUN_ID" "$REQUESTED_REVISION"
+          signer_host=${GITHUB_SERVER_URL#https://}
+          gh attestation verify "$MANIFEST_PATH" \
+            --repo "$EXPECTED_REPOSITORY" \
+            --signer-workflow \
+              "${signer_host}/${EXPECTED_REPOSITORY}/.github/workflows/publish.yml" \
+            --source-digest "$REQUESTED_REVISION" \
+            --deny-self-hosted-runners >/dev/null
+
+      - name: Log in for digest pulls
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Promote through the idle-color gates
+        env:
+          OBSERVE_SECONDS: ${{ inputs.observe_seconds }}
+        run: bash infra/week6/deploy.sh "$MANIFEST_PATH"
+
+      - name: Upload sanitized deployment evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: promotion-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: infra/week6/.runtime/evidence/promotion-${{ github.run_id }}-${{ github.run_attempt }}/*.json
+          if-no-files-found: warn
+          retention-days: 30

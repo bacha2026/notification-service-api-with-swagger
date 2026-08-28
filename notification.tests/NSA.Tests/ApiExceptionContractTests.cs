@@ -95,6 +95,7 @@ public sealed class ApiExceptionContractTests
         {
             builder.UseEnvironment("Testing");
             builder.UseSetting("Database:ApplyMigrationsOnStartup", "false");
+            builder.UseSetting("Authentication:Jwt:SigningKey", "test-signing-key-for-notification-api-authentication-12345");
             builder.ConfigureTestServices(services =>
             {
                 services.RemoveAll<INotificationService>();
@@ -121,8 +122,18 @@ public sealed class ApiExceptionContractTests
                 _ => Task.FromResult<IReadOnlyList<NotificationDto>>(Array.Empty<NotificationDto>())
             };
 
+        public Task<IReadOnlyList<NotificationDto>> GetCompletedNotificationsForRecipientAsync(
+            string recipientEmail,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
         public Task<NotificationDto?> GetNotificationAsync(int id, CancellationToken cancellationToken) =>
             throw new NotSupportedException();
+
+        public Task<bool> DeleteCompletedNotificationForRecipientAsync(
+            int id,
+            string recipientEmail,
+            CancellationToken cancellationToken) => throw new NotSupportedException();
 
         public Task<NotificationDto> CreateNotificationAsync(
             CreateNotificationRequest request,

@@ -1,0 +1,179 @@
+:host {
+  display: block;
+  min-height: 100dvh;
+  color: #15251f;
+  background:
+    radial-gradient(circle at 8% 5%, rgb(184 218 190 / 45%), transparent 28rem),
+    #f5f2e9;
+}
+
+.demo-shell {
+  display: grid;
+  width: min(70rem, calc(100% - 2rem));
+  gap: 1.25rem;
+  margin: 0 auto;
+  padding: 4rem 0;
+}
+
+.hero {
+  max-width: 48rem;
+  padding-bottom: 1.5rem;
+}
+
+.eyebrow {
+  margin: 0 0 0.65rem;
+  color: #526e5a;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+h1,
+h2,
+p {
+  margin-top: 0;
+}
+
+h1 {
+  margin-bottom: 1rem;
+  font: 500 clamp(2.8rem, 8vw, 5.4rem) / 0.94 Georgia, serif;
+  letter-spacing: -0.05em;
+}
+
+h2 {
+  margin-bottom: 0;
+  font-size: clamp(1.2rem, 3vw, 1.65rem);
+}
+
+.lede,
+.takeaway p {
+  color: #51605a;
+  font-size: 1.02rem;
+  line-height: 1.7;
+}
+
+code {
+  padding: 0.12rem 0.3rem;
+  border-radius: 0.25rem;
+  background: #e6eadf;
+  color: #2e5038;
+  font-size: 0.88em;
+}
+
+.evidence-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.metric-card,
+.controls,
+.takeaway {
+  border: 1px solid #d7d8cd;
+  border-radius: 0.9rem;
+  background: rgb(255 254 249 / 92%);
+  box-shadow: 0 0.8rem 2rem rgb(40 58 49 / 7%);
+}
+
+.metric-card {
+  padding: 1.4rem;
+}
+
+.metric-card span {
+  display: block;
+  color: #68766f;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.metric-card strong {
+  display: block;
+  margin: 0.35rem 0;
+  color: #244b31;
+  font: 500 2.8rem / 1 Georgia, serif;
+}
+
+.metric-card p,
+.action-note {
+  margin-bottom: 0;
+  color: #68766f;
+  font-size: 0.87rem;
+  line-height: 1.5;
+}
+
+.controls {
+  display: grid;
+  gap: 1.1rem;
+  padding: 1.5rem;
+}
+
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem;
+}
+
+button {
+  min-height: 2.7rem;
+  padding: 0.65rem 0.9rem;
+  border: 1px solid transparent;
+  border-radius: 0.55rem;
+  font: inherit;
+  font-size: 0.84rem;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+button:focus-visible {
+  outline: 3px solid #83a590;
+  outline-offset: 2px;
+}
+
+.danger {
+  border-color: #cdaaa4;
+  background: #f8e9e5;
+  color: #783e35;
+}
+
+.primary {
+  background: #315b3d;
+  color: #fff;
+}
+
+.secondary {
+  background: #dfe9d5;
+  color: #294d34;
+}
+
+.ghost {
+  border-color: #ccd1c8;
+  background: transparent;
+  color: #51605a;
+}
+
+.takeaway {
+  padding: 1.5rem;
+  border-left: 0.35rem solid #788f63;
+}
+
+.takeaway p {
+  margin: 0.65rem 0 0;
+  font-size: 0.94rem;
+}
+
+@media (max-width: 40rem) {
+  .demo-shell {
+    padding: 2rem 0;
+  }
+
+  .evidence-grid {
+    grid-template-columns: 1fr;
+  }
+
+  button {
+    width: 100%;
+  }
+}

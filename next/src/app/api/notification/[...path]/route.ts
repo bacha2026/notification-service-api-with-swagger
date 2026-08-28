@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 const notificationApiBaseUrls = process.env.NOTIFICATION_API_URL
   ? [process.env.NOTIFICATION_API_URL.replace(/\/+$/, "")]
-  : ["http://localhost:8080", "http://localhost:5280"];
+  : ["http://localhost:8081", "http://localhost:5280"];
 
 type RouteParams = {
   params: Promise<{ path: string[] }>;
@@ -11,13 +11,37 @@ type RouteParams = {
 async function proxyNotificationApi(request: NextRequest, { params }: RouteParams) {
   const { path } = await params;
   const encodedPath = path.map((segment) => encodeURIComponent(segment)).join("/");
-  const contentType = request.headers.get("content-type");
-  const accept = request.headers.get("accept");
   const body = request.method === "GET" || request.method === "HEAD" ? undefined : await request.arrayBuffer();
   const headers = new Headers();
+  const forwardedRequestHeaders = [
+    "accept",
+    "authorization",
+    "baggage",
+    "content-type",
+    "traceparent",
+    "tracestate",
+    "x-correlation-id",
+    "x-forwarded-for",
+    "x-idempotency-key",
+  ];
 
-  if (contentType) headers.set("content-type", contentType);
-  if (accept) headers.set("accept", accept);
+  for (const name of forwardedRequestHeaders) {
+    const value = request.headers.get(name);
+    if (value) headers.set(name, value);
+  }
+
+  // Preserve edge-supplied client metadata when present; otherwise derive
+  // host/protocol from the URL parsed by Next.js.
+  headers.set(
+    "x-forwarded-host",
+    request.headers.get("x-forwarded-host") ?? request.headers.get("host") ?? request.nextUrl.host,
+  );
+  headers.set(
+    "x-forwarded-proto",
+    request.headers.get("x-forwarded-proto") ?? request.nextUrl.protocol.replace(/:$/, ""),
+  );
+  // JWTs are supplied from the in-memory client store and must reach the API.
+  // Do not forward browser cookies here: this proxy uses explicit bearer auth.
 
   try {
     let upstreamResponse: Response | undefined;
@@ -29,6 +53,7 @@ async function proxyNotificationApi(request: NextRequest, { params }: RouteParam
           headers,
           body,
           cache: "no-store",
+          signal: request.signal,
         });
         break;
       } catch {
@@ -39,9 +64,23 @@ async function proxyNotificationApi(request: NextRequest, { params }: RouteParam
     if (!upstreamResponse) throw new Error("Notification API is unavailable.");
 
     const responseHeaders = new Headers();
-    const upstreamContentType = upstreamResponse.headers.get("content-type");
+    const forwardedResponseHeaders = [
+      "content-type",
+      "www-authenticate",
+      "location",
+      "link",
+      "idempotency-replayed",
+      "x-correlation-id",
+      "x-notification-handoff",
+      "x-notification-job-id",
+      "x-release-color",
+      "x-release-sha",
+    ];
 
-    if (upstreamContentType) responseHeaders.set("content-type", upstreamContentType);
+    for (const name of forwardedResponseHeaders) {
+      const value = upstreamResponse.headers.get(name);
+      if (value) responseHeaders.set(name, value);
+    }
 
     if (upstreamResponse.status === 204) {
       return new NextResponse(null, { status: upstreamResponse.status, headers: responseHeaders });

@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -86,16 +87,21 @@ public sealed class OrderNotificationWorkflowTests : IClassFixture<NsaApiFactory
                 persistedJob.Items,
                 item => item.RecipientEmail == visitorEmail && item.Subject == $"Order #{orderId} received");
 
-            var publisher = scope.ServiceProvider.GetRequiredService<IBulkNotificationCommandPublisher>();
-            var testPublisher = Assert.IsType<TestBulkNotificationCommandPublisher>(publisher);
-            var command = Assert.Single(testPublisher.Messages);
+            var outbox = await dbContext.OutboxMessages.AsNoTracking().SingleAsync(
+                message => message.AggregateId == jobId.ToString("D"));
+            var command = JsonSerializer.Deserialize<BulkNotificationRequestedV1>(
+                outbox.Payload,
+                new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            Assert.NotNull(command);
             Assert.Equal(BulkNotificationRequestedV1.CurrentSchemaVersion, command.SchemaVersion);
             Assert.Equal(jobId, command.JobId);
             Assert.Equal(correlationId, command.CorrelationId);
             Assert.Equal(correlationId, persistedJob.CorrelationId);
 
             var processor = ActivatorUtilities.CreateInstance<BulkNotificationProcessor>(scope.ServiceProvider);
-            await processor.ProcessAsync(jobId, CancellationToken.None);
+            await processor.ProcessAsync(command.MessageId, jobId, CancellationToken.None);
+            Assert.True(await dbContext.InboxMessages.AnyAsync(
+                receipt => receipt.MessageId == command.MessageId));
         }
 
         using var notificationsResponse = await client.GetAsync($"/api/v2/notifications?orderId={orderId}");

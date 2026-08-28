@@ -101,6 +101,38 @@ public sealed class ApiContractTests : IClassFixture<NsaApiFactory>
         Assert.Equal(160, productProperties.GetProperty("name").GetProperty("maxLength").GetInt32());
         Assert.Equal(0m, productProperties.GetProperty("price").GetProperty("minimum").GetDecimal());
         Assert.Equal(0, productProperties.GetProperty("quantityAvailable").GetProperty("minimum").GetInt32());
+
+        AssertResponseDescription(
+            v2.RootElement,
+            "/api/v2/auth/signup",
+            "post",
+            "429",
+            "Too many authentication attempts were submitted from this client.");
+        AssertResponseDescription(
+            v2.RootElement,
+            "/api/v2/auth/notifications/{id}/read",
+            "patch",
+            "404",
+            "The notification is incomplete, belongs to another recipient, or does not exist.");
+        AssertResponseDescription(
+            v2.RootElement,
+            "/api/v2/orders",
+            "post",
+            "503",
+            "The durable notification job store is at capacity or temporarily unavailable.");
+    }
+
+    [Fact]
+    public async Task Swagger_UI_is_available_at_the_required_route()
+    {
+        using var response = await client.GetAsync("/swagger/index.html");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("text/html", response.Content.Headers.ContentType?.MediaType);
+        Assert.Contains(
+            "SwaggerUIBundle",
+            await response.Content.ReadAsStringAsync(),
+            StringComparison.Ordinal);
     }
 
     [Theory]
@@ -136,6 +168,21 @@ public sealed class ApiContractTests : IClassFixture<NsaApiFactory>
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal("Healthy", await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Version_health_endpoint_and_release_headers_identify_the_running_artifact()
+    {
+        using var response = await client.GetAsync("/health/version");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("local", Assert.Single(response.Headers.GetValues("X-Release-Color")));
+        Assert.Equal("development", Assert.Single(response.Headers.GetValues("X-Release-Sha")));
+
+        using var payload = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("notification-api", payload.RootElement.GetProperty("service").GetString());
+        Assert.Equal("local", payload.RootElement.GetProperty("color").GetString());
+        Assert.Equal("development", payload.RootElement.GetProperty("sha").GetString());
     }
 
     [Theory]
@@ -445,6 +492,23 @@ public sealed class ApiContractTests : IClassFixture<NsaApiFactory>
             .GetProperty("schema")
             .GetProperty("$ref")
             .GetString()!;
+
+    private static void AssertResponseDescription(
+        JsonElement document,
+        string path,
+        string method,
+        string statusCode,
+        string expected) =>
+        Assert.Equal(
+            expected,
+            document
+                .GetProperty("paths")
+                .GetProperty(path)
+                .GetProperty(method)
+                .GetProperty("responses")
+                .GetProperty(statusCode)
+                .GetProperty("description")
+                .GetString());
 
     private static void AssertRequiredProperties(JsonElement schema, params string[] expectedProperties)
     {

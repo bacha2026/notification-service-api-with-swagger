@@ -1,0 +1,384 @@
+name: Publish trusted builds
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CI: "true"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  DOTNET_NOLOGO: "true"
+  NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
+  REGISTRY: ghcr.io
+
+jobs:
+  quality:
+    name: Quality gates
+    uses: ./.github/workflows/quality-gates.yml
+    with:
+      validate_containers: true
+      run_week4_live_proof: ${{ vars.RUN_WEEK4_LIVE_PROOF == 'true' }}
+
+  publish-dotnet:
+    name: Publish .NET artifact (${{ matrix.component }})
+    needs: quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - component: api
+            project: notification-api/NSA.csproj
+          - component: worker
+            project: notification.worker/NSA.Worker.csproj
+          - component: dlq-worker
+            project: notification.dlq.worker/NSA.Dlq.Worker.csproj
+          - component: outbox-worker
+            project: notification.outbox.worker/NSA.Outbox.Worker.csproj
+          - component: migrator
+            project: notification.migrator/NSA.Migrator.csproj
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up .NET from global.json
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      - name: Cache NuGet packages
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        with:
+          path: ${{ env.NUGET_PACKAGES }}
+          key: ${{ runner.os }}-nuget-${{ hashFiles('global.json', '**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Publish project
+        run: >-
+          dotnet publish "${{ matrix.project }}"
+          --configuration Release
+          --output "artifacts/publish/${{ matrix.component }}"
+          /p:UseAppHost=false
+
+      - name: Create immutable archive
+        run: >-
+          tar --create --gzip
+          --file "artifacts/${{ matrix.component }}-${GITHUB_SHA}.tar.gz"
+          --directory "artifacts/publish/${{ matrix.component }}"
+          .
+
+      - name: Upload published artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ matrix.component }}-${{ github.sha }}
+          path: artifacts/${{ matrix.component }}-${{ github.sha }}.tar.gz
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Attest published artifact provenance
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
+        with:
+          subject-path: artifacts/${{ matrix.component }}-${{ github.sha }}.tar.gz
+
+  publish-web:
+    name: Publish web artifacts
+    needs: quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: |
+            next/package-lock.json
+            angular/package-lock.json
+
+      - name: Build Next.js standalone output
+        env:
+          RELEASE_ID: ${{ github.sha }}
+        run: |
+          npm ci --prefix next
+          npm --prefix next run build
+
+      - name: Package Next.js output
+        run: |
+          mkdir -p artifacts/next/.next
+          cp -R next/.next/standalone/. artifacts/next/
+          mkdir -p artifacts/next/.next/static
+          cp -R next/.next/static/. artifacts/next/.next/static/
+          if [ -d next/public ]; then
+            mkdir -p artifacts/next/public
+            cp -R next/public/. artifacts/next/public/
+          fi
+          tar --create --gzip --file "artifacts/next-${GITHUB_SHA}.tar.gz" --directory artifacts/next .
+
+      - name: Build and package Angular output
+        run: |
+          npm ci --prefix angular
+          npm --prefix angular run build
+          tar --create --gzip --file "artifacts/angular-${GITHUB_SHA}.tar.gz" --directory angular/dist .
+
+      - name: Upload web artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: web-${{ github.sha }}
+          path: artifacts/*.tar.gz
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Attest web artifact provenance
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
+        with:
+          subject-path: artifacts/*.tar.gz
+
+  publish-images:
+    name: Publish container (${{ matrix.component }})
+    needs: [quality, publish-dotnet, publish-web]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - component: api
+            image: notification-api
+            context: .
+            dockerfile: ./notification-api/Dockerfile.api
+            build_args: ""
+          - component: worker
+            image: notification-worker
+            context: .
+            dockerfile: ./notification-api/Dockerfile.worker
+            build_args: ""
+          - component: dlq-worker
+            image: notification-dlq-worker
+            context: .
+            dockerfile: ./notification-api/Dockerfile.dlq-worker
+            build_args: ""
+          - component: outbox-worker
+            image: notification-outbox-worker
+            context: .
+            dockerfile: ./notification-api/Dockerfile.outbox-worker
+            build_args: ""
+          - component: migrator
+            image: notification-migrator
+            context: .
+            dockerfile: ./notification-api/Dockerfile.migrator
+            build_args: ""
+          - component: next
+            image: notification-web
+            context: ./next
+            dockerfile: ./next/Dockerfile
+            build_args: RELEASE_ID=${{ github.sha }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve canonical lowercase image name
+        id: image-name
+        shell: bash
+        env:
+          RAW_IMAGE: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}
+        run: echo "name=${RAW_IMAGE,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate OCI metadata
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ steps.image-name.outputs.name }}
+          flavor: latest=false
+          tags: |
+            type=sha,format=long,prefix=sha-
+            type=semver,pattern={{version}},value=${{ github.ref_name }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+      - name: Build and push image with SBOM and provenance
+        id: build
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          build-args: ${{ matrix.build_args }}
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha,scope=${{ matrix.component }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.component }}
+
+      - name: Sign image provenance
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
+        with:
+          subject-name: ${{ steps.image-name.outputs.name }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+          create-storage-record: false
+
+      - name: Record immutable image digest
+        env:
+          COMPONENT: ${{ matrix.component }}
+          IMAGE: ${{ steps.image-name.outputs.name }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+          REVISION: ${{ github.sha }}
+          GIT_REF: ${{ github.ref }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          SOURCE: ${{ github.server_url }}/${{ github.repository }}
+        run: |
+          mkdir -p artifacts/image-digests
+          jq --null-input \
+            --arg component "$COMPONENT" \
+            --arg image "$IMAGE" \
+            --arg digest "$DIGEST" \
+            --arg reference "${IMAGE}@${DIGEST}" \
+            --arg tags "$TAGS" \
+            --arg revision "$REVISION" \
+            --arg gitRef "$GIT_REF" \
+            --arg runId "$RUN_ID" \
+            --arg runAttempt "$RUN_ATTEMPT" \
+            --arg runUrl "${SOURCE}/actions/runs/${RUN_ID}" \
+            --arg source "$SOURCE" \
+            '{
+              component: $component,
+              image: $image,
+              digest: $digest,
+              reference: $reference,
+              tags: ($tags | split("\n") | map(select(length > 0))),
+              revision: $revision,
+              gitRef: $gitRef,
+              workflowRun: {id: $runId, attempt: $runAttempt, url: $runUrl},
+              source: $source,
+              attestations: {sbom: true, buildkitProvenance: true, signedGitHubProvenance: true}
+            }' \
+            > "artifacts/image-digests/${COMPONENT}.json"
+
+      - name: Upload image digest record
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: image-digest-${{ matrix.component }}-${{ github.sha }}
+          path: artifacts/image-digests/${{ matrix.component }}.json
+          if-no-files-found: error
+          retention-days: 90
+
+  release-manifest:
+    name: Assemble release manifest
+    needs: publish-images
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - name: Download image digest records
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: image-digest-*-${{ github.sha }}
+          path: artifacts/image-digests
+          merge-multiple: true
+
+      - name: Assemble and verify release manifest
+        env:
+          REVISION: ${{ github.sha }}
+          GIT_REF: ${{ github.ref }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          SOURCE: ${{ github.server_url }}/${{ github.repository }}
+        run: |
+          jq --slurp \
+            --arg revision "$REVISION" \
+            --arg gitRef "$GIT_REF" \
+            --arg runId "$RUN_ID" \
+            --arg runAttempt "$RUN_ATTEMPT" \
+            --arg runUrl "${SOURCE}/actions/runs/${RUN_ID}" \
+            --arg source "$SOURCE" \
+            '{
+              schemaVersion: 1,
+              revision: $revision,
+              gitRef: $gitRef,
+              workflowRun: {id: $runId, attempt: $runAttempt, url: $runUrl},
+              source: $source,
+              compatibility: {
+                databaseStrategy: "expand-migrate-contract",
+                rollbackSupported: true,
+                jwtKeyScope: "shared-vault",
+                messageEnvelopeVersions: [1]
+              },
+              images: sort_by(.component)
+            }' \
+            artifacts/image-digests/*.json \
+            > artifacts/release-manifest.json
+          jq --exit-status '.images | length == 6' artifacts/release-manifest.json
+          jq --exit-status '.images | all(.digest | startswith("sha256:"))' artifacts/release-manifest.json
+          jq --exit-status --arg revision "$REVISION" \
+            '.images | all(.revision == $revision)' artifacts/release-manifest.json
+          jq --exit-status \
+            '[.images[].component] | unique | length == 6' artifacts/release-manifest.json
+
+      - name: Upload release manifest
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-manifest-${{ github.sha }}
+          path: artifacts/release-manifest.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Attest release manifest provenance
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
+        with:
+          subject-path: artifacts/release-manifest.json

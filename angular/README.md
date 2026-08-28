@@ -1,59 +1,38 @@
-# AngularOnpushDemo
+# Angular OnPush demonstration
 
-This project was generated using [Angular CLI](https://github.com/angular/angular-cli) version 22.0.7.
+This small Angular 22 application is the Week 5 frontend audit deliverable. Both the root component and
+the notification-list child use `ChangeDetectionStrategy.OnPush`.
 
-## Development server
+The UI makes three change-detection rules observable:
 
-To start a local development server, run:
+1. **Same-reference mutation is not an OnPush input change.** The first button pushes into the existing
+   array. The parent can display the mutated length when another signal marks it, while the child keeps
+   its old rows because the input reference did not change.
+2. **Immutable replacement crosses the input boundary.** The second button creates a new array. Angular
+   marks the child because its input reference changed, and the child renders the complete collection.
+3. **Signals integrate with OnPush.** Updating the counter signal refreshes its consumer without calling
+   `ChangeDetectorRef.detectChanges()` or `markForCheck()` manually.
 
-```bash
-ng serve
-```
-
-Once the server is running, open your browser and navigate to `http://localhost:4200/`. The application will automatically reload whenever you modify any of the source files.
-
-## Code scaffolding
-
-Angular CLI includes powerful code scaffolding tools. To generate a new component, run:
-
-```bash
-ng generate component component-name
-```
-
-For a complete list of available schematics (such as `components`, `directives`, or `pipes`), run:
+Run it locally:
 
 ```bash
-ng generate --help
+npm install
+npm start
 ```
 
-## Building
-
-To build the project run:
+Verify the behavioral tests and production build:
 
 ```bash
-ng build
+npm test -- --watch=false
+npm run build
 ```
 
-This will compile your project and store the build artifacts in the `dist/` directory. By default, the production build optimizes your application for performance and speed.
-
-## Running unit tests
-
-To execute unit tests with the [Vitest](https://vitest.dev/) test runner, use the following command:
+Build and run the optional, non-root Nginx container used by the Week 5 Compose profile:
 
 ```bash
-ng test
+docker build -t angular-onpush-demo .
+docker run --rm -p 4200:8080 angular-onpush-demo
 ```
 
-## Running end-to-end tests
-
-For end-to-end (e2e) testing, run:
-
-```bash
-ng e2e
-```
-
-Angular CLI does not come with an end-to-end testing framework by default. You can choose one that suits your needs.
-
-## Additional Resources
-
-For more information on using the Angular CLI, including detailed command references, visit the [Angular CLI Overview and Command Reference](https://angular.dev/tools/cli) page.
+The runtime serves SPA routes through `index.html`, gives fingerprinted assets immutable cache headers,
+keeps the HTML shell uncached, and exposes `GET /healthz` for the image health check.

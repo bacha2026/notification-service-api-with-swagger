@@ -1,12 +1,11 @@
 function useUnreadCounter(initial) {
   const [unread, setUnread] = useState(initial);
 
-  const markManyAsRead = (ids) => {
-    // Stale closure: every update reused the same unread value; functional updates apply every decrement to the latest state.
-    ids.forEach(() => {
-      setUnread((currentUnread) => currentUnread - 1);
-    });
-  };
+  // Stale closure: one functional update reads the latest count, avoids batched
+  // updates fighting over captured state, and prevents an invalid negative count.
+  const markManyAsRead = useCallback((ids) => {
+    setUnread((currentUnread) => Math.max(0, currentUnread - ids.length));
+  }, []);
 
   return { unread, markManyAsRead };
 }

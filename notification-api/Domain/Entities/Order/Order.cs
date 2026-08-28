@@ -6,6 +6,12 @@ public sealed class Order
 {
     public int Id { get; set; }
     public required string VisitorEmail { get; set; }
+    /// <summary>
+    /// The authenticated account that owns this order. Legacy guest orders do
+    /// not have an owner and deliberately remain supported.
+    /// </summary>
+    public Guid? UserId { get; private set; }
+    public User? User { get; private set; }
     public OrderStatus OrderStatus { get; set; }
     public PaymentStatus PaymentStatus { get; set; }
     public FulfillmentStatus FulfillmentStatus { get; set; }
@@ -15,16 +21,26 @@ public sealed class Order
     public DateTimeOffset UpdatedAtUtc { get; set; }
     public List<OrderItem> Items { get; set; } = [];
 
-    public static Order CreateFromCart(string visitorEmail, IReadOnlyCollection<CartItem> cartItems, DateTimeOffset createdAtUtc)
+    public static Order CreateFromCart(
+        string visitorEmail,
+        IReadOnlyCollection<CartItem> cartItems,
+        DateTimeOffset createdAtUtc,
+        Guid? userId = null)
     {
         if (cartItems.Count == 0)
         {
             throw new ArgumentException("The cart is empty.");
         }
 
+        if (userId is Guid ownerId && ownerId == Guid.Empty)
+        {
+            throw new ArgumentException("A user owner must have a non-empty identifier.", nameof(userId));
+        }
+
         var order = new Order
         {
             VisitorEmail = visitorEmail.Trim(),
+            UserId = userId,
             OrderStatus = OrderStatus.Pending,
             PaymentStatus = PaymentStatus.Unpaid,
             FulfillmentStatus = FulfillmentStatus.NotStarted,

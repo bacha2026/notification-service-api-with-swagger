@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { SiteHeader } from "@/app/components/site-header";
+import { QueryProvider } from "@/app/components/query-provider";
 import { StoreProvider } from "@/app/components/store-provider";
 import "./globals.css";
 
@@ -30,10 +31,12 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full">
-        <StoreProvider>
-          <SiteHeader />
-          <main className="site-main">{children}</main>
-        </StoreProvider>
+        <QueryProvider>
+          <StoreProvider>
+            <SiteHeader />
+            <main className="site-main">{children}</main>
+          </StoreProvider>
+        </QueryProvider>
       </body>
     </html>
   );

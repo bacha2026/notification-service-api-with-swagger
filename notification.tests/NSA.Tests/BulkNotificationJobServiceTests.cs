@@ -1,13 +1,15 @@
+using System.Text.Json;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Storage;
-using Microsoft.Extensions.Logging.Abstractions;
-using NSA.Application.Abstractions;
+using Microsoft.Extensions.Configuration;
 using NSA.Application.Configuration;
 using NSA.Application.Contracts;
 using NSA.Application.Exceptions;
 using NSA.Domain.Entities;
 using NSA.Domain.Enums;
+using NSA.Infrastructure.Configuration;
 using NSA.Persistence;
 using NSA.Persistence.Concrete;
 using NSA.Service;
@@ -28,7 +30,6 @@ public sealed class BulkNotificationJobServiceTests
                 CancellationToken.None));
 
         Assert.Equal("At least one notification is required.", exception.Message);
-        Assert.Empty(harness.Publisher.Messages);
     }
 
     [Fact]
@@ -44,7 +45,7 @@ public sealed class BulkNotificationJobServiceTests
     }
 
     [Fact]
-    public async Task Queue_persists_job_and_items_then_publishes_a_small_versioned_reference()
+    public async Task Queue_persists_job_items_and_a_small_versioned_outbox_reference()
     {
         await using var harness = CreateHarness();
         var request = new CreateBulkNotificationsRequest(new[]
@@ -67,11 +68,17 @@ public sealed class BulkNotificationJobServiceTests
         Assert.Equal("first@example.com", persisted.Items.Single(item => item.Sequence == 0).RecipientEmail);
         Assert.Equal("First", persisted.Items.Single(item => item.Sequence == 0).Subject);
 
-        var command = Assert.Single(harness.Publisher.Messages);
+        var outbox = Assert.Single(await harness.Context.OutboxMessages.AsNoTracking().ToListAsync());
+        var command = JsonSerializer.Deserialize<BulkNotificationRequestedV1>(
+            outbox.Payload,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        Assert.NotNull(command);
         Assert.Equal(BulkNotificationRequestedV1.CurrentSchemaVersion, command.SchemaVersion);
         Assert.Equal(queued.JobId, command.JobId);
         Assert.Equal("trace-123", command.CorrelationId);
         Assert.NotEqual(Guid.Empty, command.MessageId);
+        Assert.Equal(outbox.Id, command.MessageId);
+        Assert.Null(outbox.PublishedAtUtc);
     }
 
     [Fact]
@@ -86,7 +93,6 @@ public sealed class BulkNotificationJobServiceTests
         await using var secondContext = new NotificationDbContext(harness.DatabaseOptions);
         var secondService = CreateService(
             secondContext,
-            harness.Publisher,
             maxTrackedJobs: 10,
             maxBatchSize: 100,
             timeProvider: harness.TimeProvider);
@@ -133,65 +139,51 @@ public sealed class BulkNotificationJobServiceTests
     }
 
     [Fact]
-    public async Task Publish_failure_is_persisted_and_reported_as_service_unavailable()
+    public async Task Queue_does_not_contact_the_broker_and_leaves_a_pending_outbox_message()
     {
-        var publisher = new RecordingPublisher(new InvalidOperationException("broker unavailable"));
-        await using var harness = CreateHarness(publisher: publisher);
+        await using var harness = CreateHarness();
 
-        var exception = await Assert.ThrowsAsync<BulkNotificationPublishException>(() =>
-            harness.Service.QueueAsync(
-                new CreateBulkNotificationsRequest(new[] { CreateItem("failure@example.com", "Failure") }),
-                "publish-failure",
-                CancellationToken.None));
+        var result = await harness.Service.QueueAsync(
+            new CreateBulkNotificationsRequest(new[] { CreateItem("durable@example.com", "Durable") }),
+            "broker-independent",
+            CancellationToken.None);
 
-        var failed = await harness.Context.BulkNotificationJobs.AsNoTracking().SingleAsync();
-        Assert.Equal(failed.Id, exception.Job.JobId);
-        Assert.Equal("publish-failure", exception.Job.CorrelationId);
-        Assert.Equal(BulkNotificationJobStatuses.PublishFailed, failed.Status);
-        Assert.NotNull(failed.CompletedAtUtc);
-        Assert.Equal("publish-failure", failed.CorrelationId);
-        Assert.DoesNotContain("broker unavailable", failed.Error, StringComparison.Ordinal);
+        Assert.Equal(BulkNotificationJobStatuses.Queued, result.Status);
+        var outbox = await harness.Context.OutboxMessages.AsNoTracking().SingleAsync();
+        Assert.Null(outbox.PublishedAtUtc);
+        Assert.Equal(0, outbox.AttemptCount);
+        Assert.Equal(result.JobId.ToString("D"), outbox.AggregateId);
     }
 
     [Fact]
-    public async Task Ambiguous_publish_failure_does_not_overwrite_concurrent_worker_completion()
+    public async Task Idempotency_replays_the_original_job_and_rejects_a_different_payload()
     {
-        var databaseRoot = new InMemoryDatabaseRoot();
-        var databaseOptions = new DbContextOptionsBuilder<NotificationDbContext>()
-            .UseInMemoryDatabase($"ambiguous-publish-{Guid.NewGuid():N}", databaseRoot)
-            .ConfigureWarnings(warnings => warnings.Ignore(CoreEventId.ManyServiceProvidersCreatedWarning))
-            .Options;
-        await using var apiContext = new NotificationDbContext(databaseOptions);
-        var publisher = new CallbackPublisher(async (message, cancellationToken) =>
-        {
-            await using var workerContext = new NotificationDbContext(databaseOptions);
-            var concurrentlyProcessed = await workerContext.BulkNotificationJobs
-                .SingleAsync(job => job.Id == message.JobId, cancellationToken);
-            concurrentlyProcessed.Status = BulkNotificationJobStatuses.Completed;
-            concurrentlyProcessed.ProcessedCount = concurrentlyProcessed.TotalCount;
-            concurrentlyProcessed.SucceededCount = concurrentlyProcessed.TotalCount;
-            concurrentlyProcessed.StartedAtUtc = DateTimeOffset.UtcNow;
-            concurrentlyProcessed.CompletedAtUtc = DateTimeOffset.UtcNow;
-            await workerContext.SaveChangesAsync(cancellationToken);
-            throw new InvalidOperationException("confirm connection lost after broker acceptance");
-        });
-        var service = CreateService(
-            apiContext,
-            publisher,
-            maxTrackedJobs: 10,
-            maxBatchSize: 100);
+        await using var harness = CreateHarness();
+        var idempotency = new IdempotencyContext("bulk-v2", "actor-1", "request-123");
+        var request = new CreateBulkNotificationsRequest(
+            new[] { CreateItem("same@example.com", "Same") });
 
-        await Assert.ThrowsAsync<BulkNotificationPublishException>(() =>
-            service.QueueAsync(
-                new CreateBulkNotificationsRequest(new[] { CreateItem("ambiguous@example.com", "Ambiguous") }),
-                "ambiguous-confirm",
+        var first = await harness.Service.QueueAsync(
+            request, "first-correlation", idempotency, CancellationToken.None);
+        var replay = await harness.Service.QueueAsync(
+            request, "retry-correlation", idempotency, CancellationToken.None);
+
+        Assert.False(first.Replayed);
+        Assert.True(replay.Replayed);
+        Assert.Equal(first.Value, replay.Value);
+        Assert.Single(await harness.Context.BulkNotificationJobs.AsNoTracking().ToListAsync());
+        Assert.Single(await harness.Context.OutboxMessages.AsNoTracking().ToListAsync());
+        var receipt = await harness.Context.IdempotencyRecords.AsNoTracking().SingleAsync();
+        Assert.NotEqual(idempotency.Key, receipt.KeyHash);
+        Assert.Equal(64, receipt.KeyHash.Length);
+
+        await Assert.ThrowsAsync<IdempotencyConflictException>(() =>
+            harness.Service.QueueAsync(
+                new CreateBulkNotificationsRequest(
+                    new[] { CreateItem("different@example.com", "Different") }),
+                "conflict",
+                idempotency,
                 CancellationToken.None));
-
-        apiContext.ChangeTracker.Clear();
-        var persisted = await apiContext.BulkNotificationJobs.AsNoTracking().SingleAsync();
-        Assert.Equal(BulkNotificationJobStatuses.Completed, persisted.Status);
-        Assert.Equal(1, persisted.ProcessedCount);
-        Assert.Equal(1, persisted.SucceededCount);
     }
 
     [Fact]
@@ -203,7 +195,7 @@ public sealed class BulkNotificationJobServiceTests
             maxTrackedJobs: 1,
             completedRetentionMinutes: 1,
             timeProvider: timeProvider);
-        harness.Context.BulkNotificationJobs.Add(new BulkNotificationJob
+        var expiredJob = new BulkNotificationJob
         {
             Id = Guid.NewGuid(),
             Status = BulkNotificationJobStatuses.Completed,
@@ -214,6 +206,22 @@ public sealed class BulkNotificationJobServiceTests
             SucceededCount = 1,
             QueuedAtUtc = now.AddMinutes(-10),
             CompletedAtUtc = now.AddMinutes(-2)
+        };
+        harness.Context.BulkNotificationJobs.Add(expiredJob);
+        harness.Context.OutboxMessages.Add(new OutboxMessage
+        {
+            Id = Guid.NewGuid(),
+            AggregateType = nameof(BulkNotificationJob),
+            AggregateId = expiredJob.Id.ToString("D"),
+            MessageType = BulkNotificationRequestedV1.MessageType,
+            SchemaVersion = 1,
+            Payload = "{}",
+            Exchange = "test.commands",
+            RoutingKey = "bulk.requested",
+            CorrelationId = expiredJob.CorrelationId,
+            OccurredAtUtc = expiredJob.QueuedAtUtc,
+            NextAttemptAtUtc = expiredJob.QueuedAtUtc,
+            PublishedAtUtc = expiredJob.CompletedAtUtc
         });
         await harness.Context.SaveChangesAsync();
 
@@ -223,7 +231,223 @@ public sealed class BulkNotificationJobServiceTests
             CancellationToken.None);
 
         Assert.Single(await harness.Context.BulkNotificationJobs.AsNoTracking().ToListAsync());
+        var retainedOutbox = await harness.Context.OutboxMessages.AsNoTracking().SingleAsync();
+        Assert.Equal(replacement.JobId.ToString("D"), retainedOutbox.AggregateId);
         Assert.NotNull(await harness.Service.GetStatusAsync(replacement.JobId, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Completed_jobs_referenced_by_visible_notifications_survive_retention_cleanup()
+    {
+        var now = new DateTimeOffset(2026, 7, 20, 4, 0, 0, TimeSpan.Zero);
+        await using var harness = CreateHarness(
+            maxTrackedJobs: 1,
+            completedRetentionMinutes: 1,
+            timeProvider: new ManualTimeProvider(now));
+        var retainedJob = new BulkNotificationJob
+        {
+            Id = Guid.NewGuid(),
+            Status = BulkNotificationJobStatuses.Completed,
+            MessageSchemaVersion = 1,
+            CorrelationId = "visible-notification",
+            TotalCount = 1,
+            ProcessedCount = 1,
+            SucceededCount = 1,
+            QueuedAtUtc = now.AddMinutes(-10),
+            CompletedAtUtc = now.AddMinutes(-2),
+            Items =
+            [
+                new BulkNotificationJobItem
+                {
+                    Sequence = 0,
+                    RecipientEmail = "visible@example.test",
+                    Channel = NotificationChannel.InApp,
+                    Subject = "Visible",
+                    Body = "Visible body",
+                    Status = BulkNotificationItemStatuses.Succeeded
+                }
+            ]
+        };
+        harness.Context.BulkNotificationJobs.Add(retainedJob);
+        await harness.Context.SaveChangesAsync();
+        var retainedItem = Assert.Single(retainedJob.Items);
+        harness.Context.Notifications.Add(new Notification
+        {
+            RecipientEmail = retainedItem.RecipientEmail,
+            Channel = retainedItem.Channel,
+            Subject = retainedItem.Subject,
+            Body = retainedItem.Body,
+            IsRead = false,
+            CreatedAtUtc = now.AddMinutes(-2),
+            BulkNotificationJobId = retainedJob.Id,
+            BulkNotificationJobItemId = retainedItem.Id
+        });
+        await harness.Context.SaveChangesAsync();
+
+        await harness.Service.QueueAsync(
+            new CreateBulkNotificationsRequest(
+                new[] { CreateItem("replacement@example.com", "Replacement") }),
+            "replacement",
+            CancellationToken.None);
+
+        Assert.True(await harness.Context.BulkNotificationJobs.AnyAsync(
+            job => job.Id == retainedJob.Id));
+        Assert.Equal(2, await harness.Context.BulkNotificationJobs.CountAsync());
+    }
+
+    [Fact]
+    public async Task Dead_lettered_jobs_and_their_outbox_history_survive_retention_cleanup()
+    {
+        var now = new DateTimeOffset(2026, 7, 20, 4, 0, 0, TimeSpan.Zero);
+        await using var harness = CreateHarness(
+            completedRetentionMinutes: 1,
+            timeProvider: new ManualTimeProvider(now));
+        var deadLettered = new BulkNotificationJob
+        {
+            Id = Guid.NewGuid(),
+            Status = BulkNotificationJobStatuses.DeadLettered,
+            MessageSchemaVersion = 1,
+            CorrelationId = "awaiting-dlq-recovery",
+            TotalCount = 1,
+            QueuedAtUtc = now.AddHours(-2),
+            CompletedAtUtc = now.AddHours(-1)
+        };
+        harness.Context.BulkNotificationJobs.Add(deadLettered);
+        harness.Context.OutboxMessages.Add(new OutboxMessage
+        {
+            Id = Guid.NewGuid(),
+            AggregateType = nameof(BulkNotificationJob),
+            AggregateId = deadLettered.Id.ToString("D"),
+            MessageType = BulkNotificationRequestedV1.MessageType,
+            SchemaVersion = 1,
+            Payload = "{}",
+            Exchange = "test.commands",
+            RoutingKey = "bulk.requested",
+            CorrelationId = deadLettered.CorrelationId,
+            OccurredAtUtc = deadLettered.QueuedAtUtc,
+            NextAttemptAtUtc = deadLettered.QueuedAtUtc,
+            PublishedAtUtc = deadLettered.QueuedAtUtc
+        });
+        await harness.Context.SaveChangesAsync();
+
+        await harness.Service.QueueAsync(
+            new CreateBulkNotificationsRequest(
+                new[] { CreateItem("replacement@example.test", "Replacement") }),
+            "replacement",
+            CancellationToken.None);
+
+        Assert.True(await harness.Context.BulkNotificationJobs.AnyAsync(
+            job => job.Id == deadLettered.Id));
+        Assert.True(await harness.Context.OutboxMessages.AnyAsync(
+            message => message.AggregateId == deadLettered.Id.ToString("D")));
+    }
+
+    [Fact]
+    public async Task Expired_partial_success_graph_is_removed_with_notifications_and_outbox()
+    {
+        var now = new DateTimeOffset(2026, 7, 20, 4, 0, 0, TimeSpan.Zero);
+        await using var harness = CreateHarness(
+            completedRetentionMinutes: 1,
+            timeProvider: new ManualTimeProvider(now));
+        var partial = new BulkNotificationJob
+        {
+            Id = Guid.NewGuid(),
+            Status = BulkNotificationJobStatuses.CompletedWithErrors,
+            MessageSchemaVersion = 1,
+            CorrelationId = "partial-success",
+            TotalCount = 1,
+            ProcessedCount = 1,
+            SucceededCount = 1,
+            QueuedAtUtc = now.AddMinutes(-10),
+            CompletedAtUtc = now.AddMinutes(-2),
+            Items =
+            [
+                new BulkNotificationJobItem
+                {
+                    Sequence = 0,
+                    RecipientEmail = "partial@example.test",
+                    Channel = NotificationChannel.InApp,
+                    Subject = "Partial",
+                    Body = "Partial body",
+                    Status = BulkNotificationItemStatuses.Succeeded
+                }
+            ]
+        };
+        harness.Context.BulkNotificationJobs.Add(partial);
+        await harness.Context.SaveChangesAsync();
+        var item = Assert.Single(partial.Items);
+        harness.Context.Notifications.Add(new Notification
+        {
+            RecipientEmail = item.RecipientEmail,
+            Channel = item.Channel,
+            Subject = item.Subject,
+            Body = item.Body,
+            IsRead = false,
+            CreatedAtUtc = partial.CompletedAtUtc.Value,
+            BulkNotificationJobId = partial.Id,
+            BulkNotificationJobItemId = item.Id
+        });
+        harness.Context.OutboxMessages.Add(new OutboxMessage
+        {
+            Id = Guid.NewGuid(),
+            AggregateType = nameof(BulkNotificationJob),
+            AggregateId = partial.Id.ToString("D"),
+            MessageType = BulkNotificationRequestedV1.MessageType,
+            SchemaVersion = 1,
+            Payload = "{}",
+            Exchange = "test.commands",
+            RoutingKey = "bulk.requested",
+            CorrelationId = partial.CorrelationId,
+            OccurredAtUtc = partial.QueuedAtUtc,
+            NextAttemptAtUtc = partial.QueuedAtUtc,
+            PublishedAtUtc = partial.CompletedAtUtc
+        });
+        await harness.Context.SaveChangesAsync();
+
+        await harness.Service.QueueAsync(
+            new CreateBulkNotificationsRequest(
+                new[] { CreateItem("replacement@example.test", "Replacement") }),
+            "replacement",
+            CancellationToken.None);
+
+        Assert.False(await harness.Context.BulkNotificationJobs.AnyAsync(
+            job => job.Id == partial.Id));
+        Assert.False(await harness.Context.Notifications.AnyAsync(
+            notification => notification.BulkNotificationJobId == partial.Id));
+        Assert.False(await harness.Context.OutboxMessages.AnyAsync(
+            message => message.AggregateId == partial.Id.ToString("D")));
+    }
+
+    [Fact]
+    public async Task Replay_check_removes_a_receipt_that_expired_after_the_initial_purge_window()
+    {
+        var now = new DateTimeOffset(2026, 7, 20, 4, 0, 0, TimeSpan.Zero);
+        await using var harness = CreateHarness(timeProvider: new ManualTimeProvider(now));
+        var context = new IdempotencyContext("bulk-v2", "actor-1", "expired-key");
+        var originalStore = new IdempotencyStore(
+            harness.Context,
+            new DurabilityOptions { IdempotencyRetentionHours = 1 },
+            new ManualTimeProvider(now.AddHours(-2)));
+        originalStore.Add(
+            context,
+            "request-hash",
+            StatusCodes.Status202Accepted,
+            "original-response",
+            "test",
+            "resource-1");
+        await harness.Context.SaveChangesAsync();
+        var currentStore = new IdempotencyStore(
+            harness.Context,
+            new DurabilityOptions { IdempotencyRetentionHours = 1 },
+            new ManualTimeProvider(now));
+
+        var replay = await currentStore.TryReplayAsync<string>(
+            context,
+            "different-request-hash",
+            CancellationToken.None);
+
+        Assert.Null(replay);
+        Assert.Empty(await harness.Context.IdempotencyRecords.ToListAsync());
     }
 
     [Fact]
@@ -241,7 +465,6 @@ public sealed class BulkNotificationJobServiceTests
         int maxTrackedJobs = 10,
         int maxBatchSize = 100,
         int completedRetentionMinutes = 60,
-        RecordingPublisher? publisher = null,
         TimeProvider? timeProvider = null)
     {
         var databaseRoot = new InMemoryDatabaseRoot();
@@ -250,60 +473,46 @@ public sealed class BulkNotificationJobServiceTests
             .ConfigureWarnings(warnings => warnings.Ignore(CoreEventId.ManyServiceProvidersCreatedWarning))
             .Options;
         var context = new NotificationDbContext(databaseOptions);
-        var actualPublisher = publisher ?? new RecordingPublisher();
         var actualTimeProvider = timeProvider ?? TimeProvider.System;
         var service = CreateService(
             context,
-            actualPublisher,
             maxTrackedJobs,
             maxBatchSize,
             completedRetentionMinutes,
             actualTimeProvider);
-        return new TestHarness(context, databaseOptions, service, actualPublisher, actualTimeProvider);
+        return new TestHarness(context, databaseOptions, service, actualTimeProvider);
     }
 
     private static BulkNotificationJobService CreateService(
         NotificationDbContext context,
-        IBulkNotificationCommandPublisher publisher,
         int maxTrackedJobs,
         int maxBatchSize,
         int completedRetentionMinutes = 60,
         TimeProvider? timeProvider = null) =>
         new(
             new BulkNotificationJobRepository(context),
-            publisher,
+            context,
+            new IdempotencyStore(
+                context,
+                new DurabilityOptions(),
+                timeProvider ?? TimeProvider.System),
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["RabbitMq:CommandExchange"] = "test.commands",
+                    ["RabbitMq:CommandRoutingKey"] = "bulk.requested"
+                })
+                .Build(),
             new BulkNotificationSettings(
                 maxTrackedJobs,
                 maxBatchSize,
                 completedRetentionMinutes),
-            timeProvider ?? TimeProvider.System,
-            NullLogger<BulkNotificationJobService>.Instance);
-
-    private sealed class RecordingPublisher(Exception? exception = null) : IBulkNotificationCommandPublisher
-    {
-        public List<BulkNotificationRequestedV1> Messages { get; } = new();
-
-        public Task PublishAsync(BulkNotificationRequestedV1 message, CancellationToken cancellationToken)
-        {
-            Messages.Add(message);
-            return exception is null ? Task.CompletedTask : Task.FromException(exception);
-        }
-    }
-
-    private sealed class CallbackPublisher(
-        Func<BulkNotificationRequestedV1, CancellationToken, Task> callback)
-        : IBulkNotificationCommandPublisher
-    {
-        public Task PublishAsync(
-            BulkNotificationRequestedV1 message,
-            CancellationToken cancellationToken) => callback(message, cancellationToken);
-    }
+            timeProvider ?? TimeProvider.System);
 
     private sealed record TestHarness(
         NotificationDbContext Context,
         DbContextOptions<NotificationDbContext> DatabaseOptions,
         BulkNotificationJobService Service,
-        RecordingPublisher Publisher,
         TimeProvider TimeProvider) : IAsyncDisposable
     {
         public ValueTask DisposeAsync() => Context.DisposeAsync();

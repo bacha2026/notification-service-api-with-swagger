@@ -38,7 +38,10 @@ public sealed class BulkNotificationCommandHandler(
         {
             await using var scope = scopeFactory.CreateAsyncScope();
             var processor = scope.ServiceProvider.GetRequiredService<BulkNotificationProcessor>();
-            processingResult = await processor.ProcessAsync(command.JobId, cancellationToken);
+            processingResult = await processor.ProcessAsync(
+                command.MessageId,
+                command.JobId,
+                cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {

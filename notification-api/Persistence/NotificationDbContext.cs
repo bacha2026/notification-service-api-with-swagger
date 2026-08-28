@@ -13,6 +13,13 @@ public sealed class NotificationDbContext(DbContextOptions<NotificationDbContext
     public DbSet<Notification> Notifications => Set<Notification>();
     public DbSet<BulkNotificationJob> BulkNotificationJobs => Set<BulkNotificationJob>();
     public DbSet<BulkNotificationJobItem> BulkNotificationJobItems => Set<BulkNotificationJobItem>();
+    public DbSet<IdempotencyRecord> IdempotencyRecords => Set<IdempotencyRecord>();
+    public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
+    public DbSet<InboxMessage> InboxMessages => Set<InboxMessage>();
+    public DbSet<User> Users => Set<User>();
+    public DbSet<UserCredential> UserCredentials => Set<UserCredential>();
+    public DbSet<UserExternalIdentity> UserExternalIdentities => Set<UserExternalIdentity>();
+    public DbSet<UserMfaMethod> UserMfaMethods => Set<UserMfaMethod>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -49,6 +56,11 @@ public sealed class NotificationDbContext(DbContextOptions<NotificationDbContext
             entity.Property(x => x.PaymentStatus).HasConversion<string>().HasMaxLength(40);
             entity.Property(x => x.FulfillmentStatus).HasConversion<string>().HasMaxLength(40);
             entity.Property(x => x.DeliveryStatus).HasConversion<string>().HasMaxLength(40);
+            entity.HasOne(order => order.User)
+                .WithMany()
+                .HasForeignKey(order => order.UserId)
+                .OnDelete(DeleteBehavior.SetNull);
+            entity.HasIndex(order => order.UserId);
             entity.HasMany(x => x.Items).WithOne(x => x.Order).HasForeignKey(x => x.OrderId);
             entity.HasData(
                 new Order { Id = 1, VisitorEmail = "visitor@example.test", OrderStatus = OrderStatus.Delivered, PaymentStatus = PaymentStatus.Paid, FulfillmentStatus = FulfillmentStatus.AssignedToRider, DeliveryStatus = DeliveryStatus.Delivered, TotalAmount = 1277.00m, CreatedAtUtc = new DateTimeOffset(2026, 7, 8, 3, 30, 0, TimeSpan.Zero), UpdatedAtUtc = new DateTimeOffset(2026, 7, 8, 5, 15, 0, TimeSpan.Zero) },
@@ -75,6 +87,8 @@ public sealed class NotificationDbContext(DbContextOptions<NotificationDbContext
             entity.Property(x => x.Body).HasMaxLength(4000).IsRequired();
             entity.Property(x => x.Channel).HasConversion<string>().HasMaxLength(20);
             entity.HasOne(x => x.Order).WithMany().HasForeignKey(x => x.OrderId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasIndex(x => x.BulkNotificationJobId);
+            entity.HasIndex(x => x.BulkNotificationJobItemId).IsUnique().HasFilter("[BulkNotificationJobItemId] IS NOT NULL");
             entity.HasData(
                 new Notification { Id = 1, RecipientEmail = "admin@example.test", Channel = NotificationChannel.Email, Subject = "New order #1", Body = "Order #1 for visitor@example.test. Status: Delivered; Payment: Paid; Fulfillment: AssignedToRider; Delivery: Delivered. Total: PHP 1277.00.", OrderId = 1, IsRead = true, CreatedAtUtc = new DateTimeOffset(2026, 7, 8, 3, 31, 0, TimeSpan.Zero), SentAtUtc = new DateTimeOffset(2026, 7, 8, 3, 31, 0, TimeSpan.Zero) },
                 new Notification { Id = 2, RecipientEmail = "visitor@example.test", Channel = NotificationChannel.Email, Subject = "Order #1 received", Body = "Your order #1 was received and is now delivered. Total: PHP 1277.00.", OrderId = 1, IsRead = true, CreatedAtUtc = new DateTimeOffset(2026, 7, 8, 3, 32, 0, TimeSpan.Zero), SentAtUtc = new DateTimeOffset(2026, 7, 8, 3, 32, 0, TimeSpan.Zero) },
@@ -108,6 +122,97 @@ public sealed class NotificationDbContext(DbContextOptions<NotificationDbContext
             entity.Property(x => x.Status).HasMaxLength(20).IsRequired();
             entity.Property(x => x.LastError).HasMaxLength(500);
             entity.HasIndex(x => new { x.JobId, x.Sequence }).IsUnique();
+        });
+
+        modelBuilder.Entity<IdempotencyRecord>(entity =>
+        {
+            entity.Property(x => x.Scope).HasMaxLength(200).IsRequired();
+            entity.Property(x => x.ActorId).HasMaxLength(320).IsRequired();
+            entity.Property(x => x.KeyHash).HasMaxLength(64).IsFixedLength().IsRequired();
+            entity.Property(x => x.RequestHash).HasMaxLength(64).IsFixedLength().IsRequired();
+            entity.Property(x => x.ResponseBody).HasColumnType("nvarchar(max)").IsRequired();
+            entity.Property(x => x.ResourceType).HasMaxLength(100);
+            entity.Property(x => x.ResourceId).HasMaxLength(128);
+            entity.HasIndex(x => new { x.Scope, x.ActorId, x.KeyHash }).IsUnique();
+            entity.HasIndex(x => x.ExpiresAtUtc);
+        });
+
+        modelBuilder.Entity<OutboxMessage>(entity =>
+        {
+            entity.Property(x => x.AggregateType).HasMaxLength(100).IsRequired();
+            entity.Property(x => x.AggregateId).HasMaxLength(128).IsRequired();
+            entity.Property(x => x.MessageType).HasMaxLength(200).IsRequired();
+            entity.Property(x => x.Payload).HasColumnType("nvarchar(max)").IsRequired();
+            entity.Property(x => x.Exchange).HasMaxLength(255).IsRequired();
+            entity.Property(x => x.RoutingKey).HasMaxLength(255).IsRequired();
+            entity.Property(x => x.CorrelationId).HasMaxLength(128).IsRequired();
+            entity.Property(x => x.LockedBy).HasMaxLength(128);
+            entity.Property(x => x.LastError).HasMaxLength(2000);
+            entity.HasIndex(x => new { x.PublishedAtUtc, x.NextAttemptAtUtc });
+            entity.HasIndex(x => new { x.AggregateType, x.AggregateId });
+            entity.HasIndex(x => x.LockedUntilUtc);
+        });
+
+        modelBuilder.Entity<InboxMessage>(entity =>
+        {
+            entity.HasKey(x => new { x.MessageId, x.Handler });
+            entity.Property(x => x.Handler).HasMaxLength(200).IsRequired();
+            entity.HasIndex(x => new { x.Handler, x.AggregateId });
+            entity.HasIndex(x => x.ProcessedAtUtc);
+        });
+
+        modelBuilder.Entity<User>(entity =>
+        {
+            entity.ToTable("Users");
+            entity.Property(user => user.FirstName).HasMaxLength(100).IsRequired();
+            entity.Property(user => user.LastName).HasMaxLength(100).IsRequired();
+            entity.Property(user => user.Address).HasMaxLength(500);
+            entity.Property(user => user.DateOfBirth).HasColumnType("date");
+            entity.Property(user => user.Gender).HasConversion<string>().HasMaxLength(30).IsRequired();
+            entity.Property(user => user.ContactNumber).HasMaxLength(50);
+            entity.Property(user => user.PhotoUrl).HasMaxLength(1000);
+            entity.HasOne(user => user.Credential)
+                .WithOne(credential => credential.User)
+                .HasForeignKey<UserCredential>(credential => credential.UserId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .IsRequired();
+            entity.HasMany(user => user.ExternalIdentities)
+                .WithOne(identity => identity.User)
+                .HasForeignKey(identity => identity.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasMany(user => user.MfaMethods)
+                .WithOne(method => method.User)
+                .HasForeignKey(method => method.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<UserCredential>(entity =>
+        {
+            entity.ToTable("UserCredentials");
+            entity.Property(credential => credential.Email).HasMaxLength(320).IsRequired();
+            entity.Property(credential => credential.NormalizedEmail).HasMaxLength(320).IsRequired();
+            entity.Property(credential => credential.PasswordHash).HasMaxLength(1000);
+            entity.HasIndex(credential => credential.NormalizedEmail).IsUnique();
+            entity.HasIndex(credential => credential.LockoutEndUtc);
+        });
+
+        modelBuilder.Entity<UserExternalIdentity>(entity =>
+        {
+            entity.ToTable("UserExternalIdentities");
+            entity.Property(identity => identity.Provider).HasMaxLength(64).IsRequired();
+            entity.Property(identity => identity.ProviderSubject).HasMaxLength(512).IsRequired();
+            entity.Property(identity => identity.ProviderEmail).HasMaxLength(320);
+            entity.HasIndex(identity => new { identity.Provider, identity.ProviderSubject }).IsUnique();
+            entity.HasIndex(identity => identity.UserId);
+        });
+
+        modelBuilder.Entity<UserMfaMethod>(entity =>
+        {
+            entity.ToTable("UserMfaMethods");
+            entity.Property(method => method.Type).HasConversion<string>().HasMaxLength(30).IsRequired();
+            entity.Property(method => method.Destination).HasMaxLength(320);
+            entity.Property(method => method.ProtectedSecret).HasMaxLength(2048);
+            entity.HasIndex(method => new { method.UserId, method.Type });
         });
     }
 }

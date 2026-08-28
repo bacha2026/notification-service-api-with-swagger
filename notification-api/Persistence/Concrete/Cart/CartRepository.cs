@@ -25,6 +25,12 @@ public sealed class CartRepository(NotificationDbContext dbContext) : ICartRepos
         return dbContext.CartItems.FindAsync([id], cancellationToken).AsTask();
     }
 
+    public Task<CartItem?> GetByIdForVisitorAsync(int id, string visitorEmail, CancellationToken cancellationToken)
+    {
+        return dbContext.CartItems
+            .SingleOrDefaultAsync(item => item.Id == id && item.VisitorEmail == visitorEmail, cancellationToken);
+    }
+
     public Task<bool> ProductExistsAsync(int productId, CancellationToken cancellationToken)
     {
         return dbContext.Products.AnyAsync(product => product.Id == productId, cancellationToken);

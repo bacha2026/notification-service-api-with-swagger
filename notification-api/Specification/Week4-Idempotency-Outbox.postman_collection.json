@@ -1,0 +1,207 @@
+{
+  "info": {
+    "name": "Notification API - Week 4 Idempotency and Outbox",
+    "description": "Credential-free verification of keyed bulk admission. For a manual Postman outage demonstration, run requests 1-3 while RabbitMQ is stopped, restart RabbitMQ, then select only request 4 in Collection Runner. Automated Newman runs execute the complete collection with RabbitMQ available after the separate runtime verifier proves the outage sequence. Request 4 polls and fails unless the relay and consumer reach Completed with exactly one successful effect.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080/api/v2"
+    },
+    {
+      "key": "idempotencyKey",
+      "value": ""
+    },
+    {
+      "key": "jobId",
+      "value": ""
+    },
+    {
+      "key": "statusPollAttempt",
+      "value": "0"
+    },
+    {
+      "key": "maxStatusPollAttempts",
+      "value": "60"
+    },
+    {
+      "key": "statusPollDelayMilliseconds",
+      "value": "2000"
+    }
+  ],
+  "item": [
+    {
+      "name": "1 - Accept one durable bulk job",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.collectionVariables.set('idempotencyKey', pm.variables.replaceIn('{{$guid}}'));"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Accepted', () => pm.response.to.have.status(202));",
+              "const response = pm.response.json();",
+              "pm.expect(response.jobId).to.be.a('string').and.not.empty;",
+              "pm.collectionVariables.set('jobId', response.jobId);",
+              "pm.collectionVariables.set('originalCorrelationId', response.correlationId);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "X-Idempotency-Key",
+            "value": "{{idempotencyKey}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"notifications\": [\n    {\n      \"recipientEmail\": \"week4-recipient@example.test\",\n      \"channel\": 1,\n      \"subject\": \"Week 4 broker outage proof\",\n      \"body\": \"This notification was admitted through the transactional Outbox.\",\n      \"orderId\": null\n    }\n  ]\n}"
+        },
+        "url": "{{baseUrl}}/notifications/bulk",
+        "description": "Run while RabbitMQ is stopped. SQL Server must commit one job, item, Outbox message, and idempotency response before this returns 202."
+      }
+    },
+    {
+      "name": "2 - Replay the same response",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Accepted replay', () => pm.response.to.have.status(202));",
+              "pm.test('Replay is identified', () => pm.expect(pm.response.headers.get('Idempotency-Replayed')).to.eql('true'));",
+              "const response = pm.response.json();",
+              "pm.expect(response.jobId).to.eql(pm.collectionVariables.get('jobId'));",
+              "pm.expect(response.correlationId).to.eql(pm.collectionVariables.get('originalCorrelationId'));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "X-Idempotency-Key",
+            "value": "{{idempotencyKey}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"notifications\": [\n    {\n      \"recipientEmail\": \"week4-recipient@example.test\",\n      \"channel\": 1,\n      \"subject\": \"Week 4 broker outage proof\",\n      \"body\": \"This notification was admitted through the transactional Outbox.\",\n      \"orderId\": null\n    }\n  ]\n}"
+        },
+        "url": "{{baseUrl}}/notifications/bulk",
+        "description": "Must return the original job and create no additional database rows."
+      }
+    },
+    {
+      "name": "3 - Reject key reuse with a different payload",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Conflict', () => pm.response.to.have.status(409));",
+              "pm.test('Problem Details', () => pm.expect(pm.response.headers.get('Content-Type')).to.include('application/problem+json'));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "X-Idempotency-Key",
+            "value": "{{idempotencyKey}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"notifications\": [\n    {\n      \"recipientEmail\": \"week4-recipient@example.test\",\n      \"channel\": 1,\n      \"subject\": \"Changed payload must conflict\",\n      \"body\": \"This must not create another job.\",\n      \"orderId\": null\n    }\n  ]\n}"
+        },
+        "url": "{{baseUrl}}/notifications/bulk"
+      }
+    },
+    {
+      "name": "4 - Read the original job status",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const priorAttempts = Number(pm.collectionVariables.get('statusPollAttempt') || 0);",
+              "const delay = Number(pm.collectionVariables.get('statusPollDelayMilliseconds') || 2000);",
+              "if (priorAttempts > 0 && delay > 0) {",
+              "  setTimeout(() => {}, delay);",
+              "}"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is available', () => pm.response.to.have.status(200));",
+              "const response = pm.response.json();",
+              "pm.expect(response.jobId).to.eql(pm.collectionVariables.get('jobId'));",
+              "const attempt = Number(pm.collectionVariables.get('statusPollAttempt') || 0) + 1;",
+              "const maxAttempts = Number(pm.collectionVariables.get('maxStatusPollAttempts') || 60);",
+              "pm.collectionVariables.set('statusPollAttempt', String(attempt));",
+              "if (response.status === 'Completed') {",
+              "  pm.test('Outbox relay and consumer complete the durable job', () => {",
+              "    pm.expect(response.totalCount).to.eql(1);",
+              "    pm.expect(response.processedCount).to.eql(1);",
+              "    pm.expect(response.succeededCount).to.eql(1);",
+              "    pm.expect(response.failedCount).to.eql(0);",
+              "  });",
+              "  pm.collectionVariables.unset('statusPollAttempt');",
+              "} else if (attempt < maxAttempts) {",
+              "  console.log(`Relay status ${response.status}; polling again (${attempt}/${maxAttempts}).`);",
+              "  pm.execution.setNextRequest(pm.info.requestName);",
+              "} else {",
+              "  pm.test(`Outbox relay completes within ${maxAttempts} polls`, () => {",
+              "    pm.expect(response.status).to.eql('Completed');",
+              "  });",
+              "  pm.collectionVariables.unset('statusPollAttempt');",
+              "  pm.execution.setNextRequest(null);",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/notifications/bulk/{{jobId}}",
+        "description": "Restart RabbitMQ before running this request. Collection Runner/Newman automatically polls every two seconds and fails unless the relay and consumer reach Completed with exactly one successful effect. In the Postman Send UI, resend this request until it completes because setNextRequest applies only to collection runs."
+      }
+    }
+  ]
+}

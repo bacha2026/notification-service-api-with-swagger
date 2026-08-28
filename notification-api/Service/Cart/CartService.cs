@@ -1,6 +1,7 @@
 using NSA.Application.Abstractions;
 using NSA.Application.Configuration;
 using NSA.Application.Contracts;
+using NSA.Application.Exceptions;
 using NSA.Domain.Entities;
 
 namespace NSA.Service;
@@ -15,32 +16,26 @@ public sealed class CartService(
         return BuildCartDtoAsync(visitorEmail, cancellationToken);
     }
 
-    public async Task<CartDto?> AddItemAsync(AddCartItemRequest request, CancellationToken cancellationToken)
+    public Task<CartDto> GetCartForAuthenticatedUserAsync(string visitorEmail, CancellationToken cancellationToken)
     {
-        var productExists = await cartRepository.ProductExistsAsync(request.ProductId, cancellationToken);
-        if (!productExists)
-        {
-            return null;
-        }
-
-        var visitorEmail = ResolveVisitorEmail(request.VisitorEmail);
-        var cartItem = await cartRepository.GetByVisitorAndProductAsync(visitorEmail, request.ProductId, cancellationToken);
-        if (cartItem is null)
-        {
-            cartRepository.Add(CartItem.Create(
-                visitorEmail,
-                request.ProductId,
-                request.Quantity,
-                timeProvider.GetUtcNow()));
-        }
-        else
-        {
-            cartItem.AddQuantity(request.Quantity, timeProvider.GetUtcNow());
-        }
-
-        await cartRepository.SaveChangesAsync(cancellationToken);
-        return await BuildCartDtoAsync(visitorEmail, cancellationToken);
+        return BuildCartDtoAsync(NormalizeAuthenticatedVisitorEmail(visitorEmail), cancellationToken);
     }
+
+    public Task<CartDto?> AddItemAsync(AddCartItemRequest request, CancellationToken cancellationToken)
+    {
+        var visitorEmail = ResolveVisitorEmail(request.VisitorEmail);
+        return AddItemAsync(visitorEmail, request.ProductId, request.Quantity, cancellationToken);
+    }
+
+    public Task<CartDto?> AddItemForAuthenticatedUserAsync(
+        string visitorEmail,
+        AddCurrentUserCartItemRequest request,
+        CancellationToken cancellationToken) =>
+        AddItemAsync(
+            NormalizeAuthenticatedVisitorEmail(visitorEmail),
+            request.ProductId,
+            request.Quantity,
+            cancellationToken);
 
     public async Task<CartDto?> UpdateItemAsync(int cartItemId, UpdateCartItemRequest request, CancellationToken cancellationToken)
     {
@@ -55,6 +50,27 @@ public sealed class CartService(
         return await BuildCartDtoAsync(cartItem.VisitorEmail, cancellationToken);
     }
 
+    public async Task<CartDto?> UpdateItemForAuthenticatedUserAsync(
+        int cartItemId,
+        string visitorEmail,
+        UpdateCartItemRequest request,
+        CancellationToken cancellationToken)
+    {
+        var normalizedVisitorEmail = NormalizeAuthenticatedVisitorEmail(visitorEmail);
+        var cartItem = await cartRepository.GetByIdForVisitorAsync(
+            cartItemId,
+            normalizedVisitorEmail,
+            cancellationToken);
+        if (cartItem is null)
+        {
+            return null;
+        }
+
+        cartItem.UpdateQuantity(request.Quantity, timeProvider.GetUtcNow());
+        await cartRepository.SaveChangesAsync(cancellationToken);
+        return await BuildCartDtoAsync(normalizedVisitorEmail, cancellationToken);
+    }
+
     public async Task<bool> RemoveItemAsync(int cartItemId, CancellationToken cancellationToken)
     {
         var cartItem = await cartRepository.GetByIdAsync(cartItemId, cancellationToken);
@@ -66,6 +82,55 @@ public sealed class CartService(
         cartRepository.Remove(cartItem);
         await cartRepository.SaveChangesAsync(cancellationToken);
         return true;
+    }
+
+    public async Task<bool> RemoveItemForAuthenticatedUserAsync(
+        int cartItemId,
+        string visitorEmail,
+        CancellationToken cancellationToken)
+    {
+        var cartItem = await cartRepository.GetByIdForVisitorAsync(
+            cartItemId,
+            NormalizeAuthenticatedVisitorEmail(visitorEmail),
+            cancellationToken);
+        if (cartItem is null)
+        {
+            return false;
+        }
+
+        cartRepository.Remove(cartItem);
+        await cartRepository.SaveChangesAsync(cancellationToken);
+        return true;
+    }
+
+    private async Task<CartDto?> AddItemAsync(
+        string visitorEmail,
+        int productId,
+        int quantity,
+        CancellationToken cancellationToken)
+    {
+        var productExists = await cartRepository.ProductExistsAsync(productId, cancellationToken);
+        if (!productExists)
+        {
+            return null;
+        }
+
+        var cartItem = await cartRepository.GetByVisitorAndProductAsync(visitorEmail, productId, cancellationToken);
+        if (cartItem is null)
+        {
+            cartRepository.Add(CartItem.Create(
+                visitorEmail,
+                productId,
+                quantity,
+                timeProvider.GetUtcNow()));
+        }
+        else
+        {
+            cartItem.AddQuantity(quantity, timeProvider.GetUtcNow());
+        }
+
+        await cartRepository.SaveChangesAsync(cancellationToken);
+        return await BuildCartDtoAsync(visitorEmail, cancellationToken);
     }
 
     private async Task<CartDto> BuildCartDtoAsync(string visitorEmail, CancellationToken cancellationToken)
@@ -82,5 +147,15 @@ public sealed class CartService(
 
     private string ResolveVisitorEmail(string visitorEmail) =>
         recipientSettings.ResolveVisitorEmail(visitorEmail);
+
+    private static string NormalizeAuthenticatedVisitorEmail(string visitorEmail)
+    {
+        if (string.IsNullOrWhiteSpace(visitorEmail))
+        {
+            throw new RequestValidationException("An authenticated visitor email is required.");
+        }
+
+        return visitorEmail.Trim();
+    }
 
 }

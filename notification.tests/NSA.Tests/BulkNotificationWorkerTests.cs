@@ -41,6 +41,27 @@ public sealed class BulkNotificationProcessorTests
     }
 
     [Fact]
+    public async Task Processor_records_an_inbox_receipt_and_skips_the_same_delivery()
+    {
+        await using var context = CreateContext();
+        var job = CreateJob("exactly-once");
+        context.BulkNotificationJobs.Add(job);
+        await context.SaveChangesAsync();
+        var dispatcher = new ControlledNotificationService();
+        var processor = CreateProcessor(context, dispatcher);
+        var messageId = Guid.NewGuid();
+
+        await processor.ProcessAsync(messageId, job.Id, CancellationToken.None);
+        await processor.ProcessAsync(messageId, job.Id, CancellationToken.None);
+
+        Assert.Equal(new[] { "exactly-once" }, dispatcher.Subjects);
+        var receipt = await context.InboxMessages.SingleAsync();
+        Assert.Equal(messageId, receipt.MessageId);
+        Assert.Equal(job.Id, receipt.AggregateId);
+        Assert.Equal(BulkNotificationRequestedV1.MessageType, receipt.Handler);
+    }
+
+    [Fact]
     public async Task Processor_recovers_a_publish_failed_job_when_an_ambiguous_command_arrives()
     {
         await using var context = CreateContext();
@@ -125,6 +146,23 @@ public sealed class BulkNotificationProcessorTests
     }
 
     [Fact]
+    public async Task Processor_does_not_record_inbox_before_a_retryable_failure_completes()
+    {
+        await using var context = CreateContext();
+        var job = CreateJob("transient");
+        context.BulkNotificationJobs.Add(job);
+        await context.SaveChangesAsync();
+        var processor = CreateProcessor(
+            context,
+            new ControlledNotificationService(transientFailureSubject: "transient"));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            processor.ProcessAsync(Guid.NewGuid(), job.Id, CancellationToken.None));
+
+        Assert.Empty(await context.InboxMessages.ToListAsync());
+    }
+
+    [Fact]
     public async Task Opt_in_failure_injection_provides_a_deterministic_poison_path()
     {
         await using var context = CreateContext();
@@ -203,6 +241,7 @@ public sealed class BulkNotificationProcessorTests
         string? failureInjectionSubject = null) =>
         new(
             new BulkNotificationJobRepository(context),
+            context,
             dispatcher,
             new ConfiguredBulkNotificationFailureInjector(
                 new ConfigurationBuilder()
@@ -267,8 +306,18 @@ public sealed class BulkNotificationProcessorTests
         public Task<IReadOnlyList<NotificationDto>> GetNotificationsAsync(string? recipientEmail, int? orderId, CancellationToken cancellationToken) =>
             throw new NotSupportedException();
 
+        public Task<IReadOnlyList<NotificationDto>> GetCompletedNotificationsForRecipientAsync(
+            string recipientEmail,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
         public Task<NotificationDto?> GetNotificationAsync(int id, CancellationToken cancellationToken) =>
             throw new NotSupportedException();
+
+        public Task<bool> DeleteCompletedNotificationForRecipientAsync(
+            int id,
+            string recipientEmail,
+            CancellationToken cancellationToken) => throw new NotSupportedException();
 
         public Task<NotificationDto?> UpdateNotificationAsync(int id, UpdateNotificationRequest request, CancellationToken cancellationToken) =>
             throw new NotSupportedException();

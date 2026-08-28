@@ -38,6 +38,7 @@ public sealed class BulkNotificationDeadLetterRecoveryTests
             TimeProvider.System);
         var processor = new BulkNotificationProcessor(
             new BulkNotificationJobRepository(context),
+            context,
             notificationService,
             new ConfiguredBulkNotificationFailureInjector(
                 new ConfigurationBuilder()

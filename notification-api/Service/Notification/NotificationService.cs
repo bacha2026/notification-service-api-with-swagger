@@ -15,6 +15,21 @@ public sealed class NotificationService(
         return notifications.Select(ToDto).ToList();
     }
 
+    public async Task<IReadOnlyList<NotificationDto>> GetCompletedNotificationsForRecipientAsync(
+        string recipientEmail,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(recipientEmail))
+        {
+            throw new RequestValidationException("A recipient email is required.");
+        }
+
+        var notifications = await notificationRepository.GetCompletedNotificationsForRecipientAsync(
+            recipientEmail.Trim(),
+            cancellationToken);
+        return notifications.Select(ToDto).ToList();
+    }
+
     public async Task<NotificationDto?> GetNotificationAsync(int id, CancellationToken cancellationToken)
     {
         var notification = await notificationRepository.GetByIdAsync(id, cancellationToken);
@@ -31,6 +46,11 @@ public sealed class NotificationService(
             request.Body,
             request.OrderId,
             timeProvider.GetUtcNow());
+
+        if (request.BulkNotificationJobId is { } jobId && request.BulkNotificationJobItemId is { } jobItemId)
+        {
+            notification.AssociateWithBulkJob(jobId, jobItemId);
+        }
 
         notificationRepository.Add(notification);
         await notificationRepository.SaveChangesAsync(cancellationToken);
@@ -50,6 +70,39 @@ public sealed class NotificationService(
 
         await notificationRepository.SaveChangesAsync(cancellationToken);
         return ToDto(notification);
+    }
+
+    public async Task<NotificationDto?> MarkCompletedNotificationAsReadForRecipientAsync(
+        int id,
+        string recipientEmail,
+        CancellationToken cancellationToken)
+    {
+        var notification = await notificationRepository.GetCompletedNotificationForRecipientAsync(
+            id, recipientEmail.Trim(), cancellationToken);
+        if (notification is null)
+        {
+            return null;
+        }
+
+        notification.MarkAsRead();
+        await notificationRepository.SaveChangesAsync(cancellationToken);
+        return ToDto(notification);
+    }
+
+    public Task<bool> DeleteCompletedNotificationForRecipientAsync(
+        int id,
+        string recipientEmail,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(recipientEmail))
+        {
+            throw new RequestValidationException("A recipient email is required.");
+        }
+
+        return notificationRepository.DeleteCompletedNotificationForRecipientAsync(
+            id,
+            recipientEmail.Trim(),
+            cancellationToken);
     }
 
     public async Task<bool> DeleteNotificationAsync(int id, CancellationToken cancellationToken)

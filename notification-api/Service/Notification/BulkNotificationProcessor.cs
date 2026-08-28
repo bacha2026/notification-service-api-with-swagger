@@ -1,8 +1,10 @@
+using Microsoft.EntityFrameworkCore;
 using NSA.Application.Abstractions;
 using NSA.Application.Contracts;
 using NSA.Application.Exceptions;
 using NSA.Domain.Entities;
 using NSA.Domain.Enums;
+using NSA.Persistence;
 
 namespace NSA.Service;
 
@@ -19,6 +21,7 @@ public enum BulkNotificationProcessingResult
 public sealed class BulkNotificationProcessor
 {
     private readonly IBulkNotificationJobRepository jobs;
+    private readonly NotificationDbContext dbContext;
     private readonly INotificationService notificationService;
     private readonly IBulkNotificationFailureInjector failureInjector;
     private readonly TimeProvider timeProvider;
@@ -26,12 +29,14 @@ public sealed class BulkNotificationProcessor
 
     public BulkNotificationProcessor(
         IBulkNotificationJobRepository jobs,
+        NotificationDbContext dbContext,
         INotificationService notificationService,
         IBulkNotificationFailureInjector failureInjector,
         TimeProvider timeProvider,
         ILogger<BulkNotificationProcessor> logger)
     {
         this.jobs = jobs ?? throw new ArgumentNullException(nameof(jobs));
+        this.dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
         this.notificationService = notificationService ?? throw new ArgumentNullException(nameof(notificationService));
         this.failureInjector = failureInjector ?? throw new ArgumentNullException(nameof(failureInjector));
         this.timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
@@ -40,8 +45,41 @@ public sealed class BulkNotificationProcessor
 
     public async Task<BulkNotificationProcessingResult> ProcessAsync(
         Guid jobId,
+        CancellationToken cancellationToken) =>
+        await ProcessAsync(Guid.Empty, jobId, cancellationToken);
+
+    public async Task<BulkNotificationProcessingResult> ProcessAsync(
+        Guid messageId,
+        Guid jobId,
         CancellationToken cancellationToken)
     {
+        await using var transaction = dbContext.Database.IsRelational()
+            ? await dbContext.Database.BeginTransactionAsync(cancellationToken)
+            : null;
+
+        if (messageId != Guid.Empty)
+        {
+            var receipt = await dbContext.InboxMessages.SingleOrDefaultAsync(
+                candidate => candidate.MessageId == messageId
+                    && candidate.Handler == BulkNotificationRequestedV1.MessageType,
+                cancellationToken);
+            if (receipt is not null)
+            {
+                if (receipt.AggregateId != jobId)
+                {
+                    throw new InvalidOperationException(
+                        $"Inbox message {messageId} is already associated with another aggregate.");
+                }
+
+                if (transaction is not null)
+                {
+                    await transaction.CommitAsync(cancellationToken);
+                }
+
+                return BulkNotificationProcessingResult.Completed;
+            }
+        }
+
         var job = await jobs.GetWithItemsAsync(jobId, cancellationToken)
             ?? throw new BulkNotificationJobNotFoundException(jobId);
 
@@ -50,6 +88,11 @@ public sealed class BulkNotificationProcessor
             logger.LogInformation(
                 "Bulk notification job {JobId} is already dead-lettered and cannot be processed again.",
                 job.Id);
+            if (transaction is not null)
+            {
+                await transaction.CommitAsync(cancellationToken);
+            }
+
             return BulkNotificationProcessingResult.AlreadyDeadLettered;
         }
 
@@ -60,6 +103,12 @@ public sealed class BulkNotificationProcessor
                 "Bulk notification job {JobId} is already terminal with status {Status}; duplicate delivery requires no processing.",
                 job.Id,
                 job.Status);
+            await RecordInboxAsync(messageId, jobId, cancellationToken);
+            if (transaction is not null)
+            {
+                await transaction.CommitAsync(cancellationToken);
+            }
+
             return BulkNotificationProcessingResult.Completed;
         }
 
@@ -92,7 +141,11 @@ public sealed class BulkNotificationProcessor
                         item.Channel,
                         item.Subject,
                         item.Body,
-                        item.OrderId),
+                        item.OrderId)
+                    {
+                        BulkNotificationJobId = job.Id,
+                        BulkNotificationJobItemId = item.Id
+                    },
                     cancellationToken);
 
                 item.Status = BulkNotificationItemStatuses.Succeeded;
@@ -125,8 +178,44 @@ public sealed class BulkNotificationProcessor
         job.Error = job.FailedCount == 0
             ? null
             : "One or more notifications could not be processed.";
+        if (messageId != Guid.Empty)
+        {
+            dbContext.InboxMessages.Add(new InboxMessage
+            {
+                MessageId = messageId,
+                Handler = BulkNotificationRequestedV1.MessageType,
+                AggregateId = jobId,
+                ProcessedAtUtc = timeProvider.GetUtcNow()
+            });
+        }
+
         await jobs.SaveChangesAsync(cancellationToken);
+        if (transaction is not null)
+        {
+            await transaction.CommitAsync(cancellationToken);
+        }
+
         return BulkNotificationProcessingResult.Completed;
+    }
+
+    private async Task RecordInboxAsync(
+        Guid messageId,
+        Guid jobId,
+        CancellationToken cancellationToken)
+    {
+        if (messageId == Guid.Empty)
+        {
+            return;
+        }
+
+        dbContext.InboxMessages.Add(new InboxMessage
+        {
+            MessageId = messageId,
+            Handler = BulkNotificationRequestedV1.MessageType,
+            AggregateId = jobId,
+            ProcessedAtUtc = timeProvider.GetUtcNow()
+        });
+        await jobs.SaveChangesAsync(cancellationToken);
     }
 
     public async Task RecordRetryAsync(

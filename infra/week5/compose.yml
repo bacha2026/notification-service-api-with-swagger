@@ -1,0 +1,328 @@
+name: nsa-week5
+
+x-dotnet-service: &dotnet-service
+  restart: unless-stopped
+  networks:
+    - backend
+
+x-worker-environment: &worker-environment
+  DOTNET_ENVIRONMENT: Production
+  Database__ApplyMigrationsOnStartup: "false"
+  RabbitMq__HostName: rabbitmq
+
+services:
+  vault-permissions:
+    image: hashicorp/vault:1.21.4@sha256:4e33b126a59c0c333b76fb4e894722462659a6bec7c48c9ee8cea56fccfd2569
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-ec", "chown -R 100:1000 /vault/data && chmod 700 /vault/data"]
+    network_mode: none
+    volumes:
+      - vault-data:/vault/data
+    restart: "no"
+
+  vault:
+    image: hashicorp/vault:1.21.4@sha256:4e33b126a59c0c333b76fb4e894722462659a6bec7c48c9ee8cea56fccfd2569
+    # The image entrypoint already supplies -config=/vault/config. Passing the
+    # file again would load the listener twice and make port 8200 collide.
+    command: server
+    cap_add:
+      - IPC_LOCK
+    ports:
+      - "127.0.0.1:8200:8200"
+    volumes:
+      - vault-data:/vault/data
+      - ./vault/config/vault.hcl:/vault/config/vault.hcl:ro
+    networks:
+      - backend
+      - management
+    healthcheck:
+      test: ["CMD", "vault", "status", "-address=http://127.0.0.1:8200"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    depends_on:
+      vault-permissions:
+        condition: service_completed_successfully
+
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-CU26-ubuntu-22.04@sha256:ba4c8329f48fb8f02e1416be6a930ebfd71268caee78aa985f3af4315e457c89
+    entrypoint: ["/bin/bash", "/opt/nsa/start-sqlserver.sh"]
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: Developer
+    ports:
+      - "127.0.0.1:14330:1433"
+    volumes:
+      - sqlserver-data:/var/opt/mssql
+      - ./sqlserver/start-sqlserver.sh:/opt/nsa/start-sqlserver.sh:ro
+    secrets:
+      - sql_sa_password
+    networks:
+      - backend
+      - management
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          SQLCMDPASSWORD="$$(tr -d '\r\n' </run/secrets/sql_sa_password)"
+          /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -C -Q "SELECT 1" >/dev/null
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    restart: unless-stopped
+
+  database-bootstrap:
+    image: mcr.microsoft.com/mssql/server:2022-CU26-ubuntu-22.04@sha256:ba4c8329f48fb8f02e1416be6a930ebfd71268caee78aa985f3af4315e457c89
+    entrypoint: ["/bin/bash", "/opt/nsa/bootstrap-database.sh"]
+    volumes:
+      - ./sqlserver/bootstrap-database.sh:/opt/nsa/bootstrap-database.sh:ro
+    secrets:
+      - sql_sa_password
+      - sql_app_password
+      - sql_migrator_password
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+    networks:
+      - backend
+    restart: "no"
+
+  rabbitmq:
+    image: rabbitmq:4.3.5-management@sha256:6737abbfed330f31b789a8b6ac493abde809958803eb5db28186b3f50edc1626
+    environment:
+      RABBITMQ_CONFIG_FILE: /run/secrets/rabbitmq
+    ports:
+      - "127.0.0.1:56720:5672"
+      - "127.0.0.1:15672:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    secrets:
+      - source: rabbitmq_config
+        target: rabbitmq.conf
+    networks:
+      - backend
+      - management
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    restart: unless-stopped
+
+  migrator:
+    build:
+      context: ../..
+      dockerfile: notification-api/Dockerfile.migrator
+    environment:
+      DOTNET_ENVIRONMENT: Production
+    secrets:
+      - source: migrator_db_connection
+        target: ConnectionStrings__NotificationDb
+    depends_on:
+      database-bootstrap:
+        condition: service_completed_successfully
+    networks:
+      - backend
+    restart: "no"
+
+  api:
+    <<: *dotnet-service
+    build:
+      context: ../..
+      dockerfile: notification-api/Dockerfile.api
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8080
+      HttpsRedirection__Enabled: "false"
+      Database__ApplyMigrationsOnStartup: "false"
+      ReverseProxy__TrustForwardedHeaders: "true"
+      Release__Color: week5
+      Release__Sha: "${RELEASE_SHA:-local-week5}"
+      Cors__AllowedOrigins__0: http://localhost:3000
+      Cors__AllowedOrigins__1: http://127.0.0.1:3000
+    ports:
+      - "127.0.0.1:8080:8080"
+    networks:
+      - backend
+      - management
+    secrets:
+      - source: api_db_connection
+        target: ConnectionStrings__NotificationDb
+      - source: jwt_signing_key
+        target: Authentication__Jwt__SigningKey
+    depends_on:
+      migrator:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent --show-error http://127.0.0.1:8080/health/ready >/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  outbox-relay:
+    <<: *dotnet-service
+    build:
+      context: ../..
+      dockerfile: notification-api/Dockerfile.outbox-worker
+    environment:
+      <<: *worker-environment
+    secrets:
+      - source: worker_db_connection
+        target: ConnectionStrings__NotificationDb
+      - source: rabbitmq_username
+        target: RabbitMq__UserName
+      - source: rabbitmq_password
+        target: RabbitMq__Password
+    depends_on:
+      api:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/nsa-outbox-worker-ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+
+  worker:
+    <<: *dotnet-service
+    build:
+      context: ../..
+      dockerfile: notification-api/Dockerfile.worker
+    environment:
+      <<: *worker-environment
+    secrets:
+      - source: worker_db_connection
+        target: ConnectionStrings__NotificationDb
+      - source: rabbitmq_username
+        target: RabbitMq__UserName
+      - source: rabbitmq_password
+        target: RabbitMq__Password
+    depends_on:
+      api:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/nsa-worker-ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+
+  dlq-recovery-worker:
+    <<: *dotnet-service
+    build:
+      context: ../..
+      dockerfile: notification-api/Dockerfile.dlq-worker
+    environment:
+      <<: *worker-environment
+    secrets:
+      - source: worker_db_connection
+        target: ConnectionStrings__NotificationDb
+      - source: rabbitmq_username
+        target: RabbitMq__UserName
+      - source: rabbitmq_password
+        target: RabbitMq__Password
+    depends_on:
+      api:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/nsa-dlq-recovery-worker-ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+
+  next:
+    build:
+      context: ../../next
+      dockerfile: Dockerfile
+      args:
+        RELEASE_ID: "${RELEASE_SHA:-local-week5}"
+    environment:
+      NODE_ENV: production
+      NOTIFICATION_API_URL: http://api:8080
+      RELEASE_COLOR: week5
+      RELEASE_ID: "${RELEASE_SHA:-local-week5}"
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - backend
+      - edge
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health/version').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+
+  angular:
+    profiles: ["angular"]
+    build:
+      context: ../../angular
+      dockerfile: Dockerfile
+    ports:
+      - "127.0.0.1:4200:8080"
+    networks:
+      - edge
+    healthcheck:
+      test: ["CMD-SHELL", "wget --quiet --spider http://127.0.0.1:8080/ || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    restart: unless-stopped
+
+secrets:
+  sql_sa_password:
+    file: ./.runtime/secrets/platform/sql_sa_password
+  sql_app_password:
+    file: ./.runtime/secrets/platform/sql_app_password
+  sql_migrator_password:
+    file: ./.runtime/secrets/platform/sql_migrator_password
+  api_db_connection:
+    file: ./.runtime/secrets/api/app_db_connection
+  worker_db_connection:
+    file: ./.runtime/secrets/worker/app_db_connection
+  migrator_db_connection:
+    file: ./.runtime/secrets/migrator/migrator_db_connection
+  jwt_signing_key:
+    file: ./.runtime/secrets/api/jwt_signing_key
+  rabbitmq_username:
+    file: ./.runtime/secrets/worker/rabbitmq_username
+  rabbitmq_password:
+    file: ./.runtime/secrets/worker/rabbitmq_password
+  rabbitmq_config:
+    file: ./.runtime/secrets/platform/rabbitmq.conf
+
+volumes:
+  vault-data:
+    name: nsa-week5-vault-data
+  sqlserver-data:
+    name: nsa-week5-sqlserver-data
+  rabbitmq-data:
+    name: nsa-week5-rabbitmq-data
+
+networks:
+  backend:
+    name: nsa-week5-backend
+    driver: bridge
+    internal: true
+  edge:
+    name: nsa-week5-edge
+    driver: bridge
+  management:
+    name: nsa-week5-management
+    driver: bridge

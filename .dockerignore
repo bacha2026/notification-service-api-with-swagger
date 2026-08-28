@@ -5,12 +5,15 @@
 **/TestResults/
 **/artifacts/
 **/coverage/
+**/.runtime/
 
 angular/
 next/
 notification.tests/
 docs/
 drawio/
+infra/
+.github/
 bin/
 obj/
 
@@ -26,3 +29,4 @@ Notification-Project-Smoke-Test-Guide.*
 *.p12
 *.pem
 *.key
+*.pdf

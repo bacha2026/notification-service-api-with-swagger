@@ -24,7 +24,12 @@ public sealed class BulkNotificationJobRepository(NotificationDbContext dbContex
         DateTimeOffset cutoff,
         CancellationToken cancellationToken) =>
         await dbContext.BulkNotificationJobs
-            .Where(job => job.CompletedAtUtc != null && job.CompletedAtUtc < cutoff)
+            .Where(job => job.CompletedAtUtc != null
+                && job.CompletedAtUtc < cutoff
+                && (job.Status == BulkNotificationJobStatuses.CompletedWithErrors
+                    || (job.Status == BulkNotificationJobStatuses.Completed
+                        && !dbContext.Notifications.Any(notification =>
+                            notification.BulkNotificationJobId == job.Id))))
             .ToListAsync(cancellationToken);
 
     public void Add(BulkNotificationJob job) => dbContext.BulkNotificationJobs.Add(job);

@@ -7,6 +7,7 @@ using NSA.Service;
 using NSA.Workers.Shared.Hosting;
 
 var builder = Host.CreateApplicationBuilder(args);
+builder.Configuration.AddKeyPerFile("/run/secrets", optional: true);
 
 builder.Services.AddNotificationWorkerInfrastructure(builder.Configuration);
 builder.Services.AddScoped<IBulkNotificationJobRepository, BulkNotificationJobRepository>();

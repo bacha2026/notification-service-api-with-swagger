@@ -100,23 +100,40 @@ public sealed class NotificationsController(INotificationService notificationSer
     }
 
     /// <summary>Queues a batch of notification records for asynchronous processing.</summary>
-    /// <remarks>Send between 1 and 100 notifications in the request body. Processing continues in the background after the endpoint returns; save the returned jobId or Location header and use the bulk status endpoint to monitor progress.</remarks>
+    /// <remarks>Send between 1 and 100 notifications in the request body. Processing continues in the background after the endpoint returns. An optional X-Idempotency-Key makes retries return the original accepted job; reusing that key with a different payload returns 409. You can use this sample payload: { "notifications": [ { "recipientEmail": "bmacha2027@gmail.com", "channel": 4, "subject": "[week3-poison]", "body": "Recovered administrator notification.", "orderId": null }, { "recipientEmail": "bmacha2015@gmail.com", "channel": 4, "subject": "[week3-poison]", "body": "Recovered visitor notification.", "orderId": null } ] }</remarks>
     /// <response code="202">The job was accepted. Use the status endpoint and returned job id to monitor it.</response>
-    /// <response code="400">The batch is empty, too large, or contains an invalid notification.</response>
-    /// <response code="503">The job store is at capacity or the broker did not confirm publication.</response>
+    /// <response code="400">The batch is empty, too large, contains an invalid notification, or has an invalid idempotency key.</response>
+    /// <response code="409">The idempotency key was already used with a different payload.</response>
+    /// <response code="503">The durable job store is at capacity.</response>
     [HttpPost("bulk")]
     [ProducesResponseType(typeof(BulkNotificationJobDto), StatusCodes.Status202Accepted)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
     [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
     public async Task<ActionResult<BulkNotificationJobDto>> CreateBulkNotifications(
         CreateBulkNotificationsRequest request,
         [FromServices] IBulkNotificationJobService bulkJobs,
+        [FromHeader(Name = IdempotencyContext.HeaderName)] string? idempotencyKey,
         CancellationToken cancellationToken)
     {
         var correlationId = HttpContext.TraceIdentifier;
-        var job = await bulkJobs.QueueAsync(request, correlationId, cancellationToken);
-        Response.Headers["X-Correlation-ID"] = job.CorrelationId;
         var requestedVersion = HttpContext.GetRequestedApiVersion();
+        var idempotency = IdempotencyContext.Create(
+            $"notifications.bulk.create.v{requestedVersion?.MajorVersion ?? 2}",
+            "global",
+            idempotencyKey);
+        var result = await bulkJobs.QueueAsync(
+            request,
+            correlationId,
+            idempotency,
+            cancellationToken);
+        var job = result.Value;
+        if (result.Replayed)
+        {
+            Response.Headers[IdempotencyContext.ReplayHeaderName] = "true";
+        }
+
+        Response.Headers["X-Correlation-ID"] = job.CorrelationId;
         var statusLocation = requestedVersion is null
             ? $"/api/notifications/bulk/{job.JobId}"
             : $"/api/v{requestedVersion.MajorVersion}/notifications/bulk/{job.JobId}";

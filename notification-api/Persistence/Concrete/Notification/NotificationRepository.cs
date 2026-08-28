@@ -29,6 +29,74 @@ public sealed class NotificationRepository(NotificationDbContext dbContext) : IN
         return dbContext.Notifications.FindAsync([id], cancellationToken).AsTask();
     }
 
+    public async Task<IReadOnlyList<Notification>> GetCompletedNotificationsForRecipientAsync(
+        string recipientEmail,
+        CancellationToken cancellationToken)
+    {
+        var normalizedRecipientEmail = recipientEmail.Trim();
+
+        return await dbContext.Notifications
+            .Where(notification => notification.RecipientEmail == normalizedRecipientEmail
+                && notification.BulkNotificationJobId.HasValue
+                && notification.BulkNotificationJobItemId.HasValue
+                && dbContext.BulkNotificationJobs.Any(job =>
+                    job.Id == notification.BulkNotificationJobId
+                    && job.Status == BulkNotificationJobStatuses.Completed)
+                && dbContext.BulkNotificationJobItems.Any(item =>
+                    item.Id == notification.BulkNotificationJobItemId
+                    && item.JobId == notification.BulkNotificationJobId
+                    && item.Status == BulkNotificationItemStatuses.Succeeded))
+            .OrderByDescending(notification => notification.CreatedAtUtc)
+            .ToListAsync(cancellationToken);
+    }
+
+    public Task<Notification?> GetCompletedNotificationForRecipientAsync(
+        int id,
+        string recipientEmail,
+        CancellationToken cancellationToken)
+    {
+        return dbContext.Notifications.SingleOrDefaultAsync(notification =>
+            notification.Id == id
+            && notification.RecipientEmail == recipientEmail
+            && notification.BulkNotificationJobId.HasValue
+            && notification.BulkNotificationJobItemId.HasValue
+            && dbContext.BulkNotificationJobs.Any(job =>
+                job.Id == notification.BulkNotificationJobId
+                && job.Status == BulkNotificationJobStatuses.Completed)
+            && dbContext.BulkNotificationJobItems.Any(item =>
+                item.Id == notification.BulkNotificationJobItemId
+                && item.JobId == notification.BulkNotificationJobId
+                && item.Status == BulkNotificationItemStatuses.Succeeded),
+            cancellationToken);
+    }
+
+    public async Task<bool> DeleteCompletedNotificationForRecipientAsync(
+        int id,
+        string recipientEmail,
+        CancellationToken cancellationToken)
+    {
+        var notification = await GetCompletedNotificationForRecipientAsync(
+            id,
+            recipientEmail.Trim(),
+            cancellationToken);
+        if (notification is null)
+        {
+            return false;
+        }
+
+        dbContext.Notifications.Remove(notification);
+        try
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+            return true;
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            dbContext.ChangeTracker.Clear();
+            return false;
+        }
+    }
+
     public async Task<IReadOnlyList<Notification>> GetNotificationsForVisitorAsync(
         string visitorEmail,
         CancellationToken cancellationToken)

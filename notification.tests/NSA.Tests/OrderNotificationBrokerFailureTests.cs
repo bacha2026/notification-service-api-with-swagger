@@ -13,12 +13,9 @@ namespace NSA.Tests;
 public sealed class OrderNotificationBrokerFailureTests
 {
     [Fact]
-    public async Task Committed_order_remains_created_when_notification_publication_fails()
+    public async Task Broker_outage_does_not_prevent_durable_order_admission()
     {
-        await using var factory = new NsaApiFactory
-        {
-            BulkNotificationPublishException = new InvalidOperationException("broker unavailable")
-        };
+        await using var factory = new NsaApiFactory();
         using var client = factory.CreateClient(new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactoryClientOptions
         {
             AllowAutoRedirect = false
@@ -34,7 +31,7 @@ public sealed class OrderNotificationBrokerFailureTests
         var orderId = body.RootElement.GetProperty("id").GetInt32();
         var jobId = Guid.Parse(Assert.Single(response.Headers.GetValues("X-Notification-Job-ID")));
         Assert.Equal(
-            NotificationHandoffStatus.Unconfirmed.ToString(),
+            NotificationHandoffStatus.Confirmed.ToString(),
             Assert.Single(response.Headers.GetValues("X-Notification-Handoff")));
         Assert.Contains(
             $"/api/v2/notifications/bulk/{jobId}",
@@ -45,17 +42,20 @@ public sealed class OrderNotificationBrokerFailureTests
         var dbContext = scope.ServiceProvider.GetRequiredService<NotificationDbContext>();
         Assert.True(await dbContext.Orders.AnyAsync(order => order.Id == orderId));
 
-        var failedJob = await dbContext.BulkNotificationJobs
+        var queuedJob = await dbContext.BulkNotificationJobs
             .AsNoTracking()
             .Include(job => job.Items)
             .SingleAsync(job => job.Id == jobId);
-        Assert.Equal(BulkNotificationJobStatuses.PublishFailed, failedJob.Status);
-        Assert.Equal(2, failedJob.Items.Count);
-        Assert.All(failedJob.Items, item => Assert.Equal(orderId, item.OrderId));
+        Assert.Equal(BulkNotificationJobStatuses.Queued, queuedJob.Status);
+        Assert.Equal(2, queuedJob.Items.Count);
+        Assert.All(queuedJob.Items, item => Assert.Equal(orderId, item.OrderId));
+        var outbox = await dbContext.OutboxMessages.AsNoTracking().SingleAsync();
+        Assert.Equal(jobId.ToString("D"), outbox.AggregateId);
+        Assert.Null(outbox.PublishedAtUtc);
     }
 
     [Fact]
-    public async Task Committed_order_reports_rejected_handoff_when_job_store_is_at_capacity()
+    public async Task Checkout_is_rejected_when_the_atomic_notification_admission_is_at_capacity()
     {
         await using var factory = new NsaApiFactory
         {
@@ -86,21 +86,11 @@ public sealed class OrderNotificationBrokerFailureTests
             visitorEmail = "visitor@example.test"
         });
 
-        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-        Assert.Equal(
-            NotificationHandoffStatus.Rejected.ToString(),
-            Assert.Single(response.Headers.GetValues("X-Notification-Handoff")));
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
         Assert.False(response.Headers.Contains("X-Notification-Job-ID"));
-
-        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        var orderId = body.RootElement.GetProperty("id").GetInt32();
         await using var verificationScope = factory.Services.CreateAsyncScope();
         var verificationContext = verificationScope.ServiceProvider.GetRequiredService<NotificationDbContext>();
-        Assert.True(await verificationContext.Orders.AnyAsync(order => order.Id == orderId));
         Assert.Single(await verificationContext.BulkNotificationJobs.AsNoTracking().ToListAsync());
-
-        var publisher = verificationScope.ServiceProvider
-            .GetRequiredService<IBulkNotificationCommandPublisher>();
-        Assert.Empty(Assert.IsType<TestBulkNotificationCommandPublisher>(publisher).Messages);
+        Assert.Empty(await verificationContext.OutboxMessages.AsNoTracking().ToListAsync());
     }
 }

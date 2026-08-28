@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useStore } from "@/app/components/store-provider";
 import type { Product } from "@/app/lib/store-types";
 
@@ -66,12 +66,18 @@ export function ProductCatalog() {
     });
   }, [category, products, search]);
 
+  useEffect(() => {
+    if (addedProductId === null) return;
+
+    const timeoutId = window.setTimeout(() => setAddedProductId(null), 1800);
+    return () => window.clearTimeout(timeoutId);
+  }, [addedProductId]);
+
   async function handleAddToCart(productId: number) {
     const added = await addToCart(productId);
 
     if (added) {
       setAddedProductId(productId);
-      window.setTimeout(() => setAddedProductId(null), 1800);
     }
   }
 

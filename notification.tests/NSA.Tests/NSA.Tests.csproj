@@ -24,6 +24,7 @@
     <ProjectReference Include="../../notification.worker.shared/NSA.Worker.Shared.csproj" />
     <ProjectReference Include="../../notification.worker/NSA.Worker.csproj" Aliases="primary" />
     <ProjectReference Include="../../notification.dlq.worker/NSA.Dlq.Worker.csproj" Aliases="dlq" />
+    <ProjectReference Include="../../notification.outbox.worker/NSA.Outbox.Worker.csproj" Aliases="outbox" />
   </ItemGroup>
 
 </Project>

@@ -1,14 +1,17 @@
 function WindowWidthTracker() {
-  const [width, setWidth] = useState(window.innerWidth);
+  const [width, setWidth] = useState(null);
 
-  // Missing cleanup:  added a resize event listener but never removed it; removing this listener on unmount prevents duplicate updates.
+  // Missing cleanup + browser-only render access: read window after mount, then
+  // remove the exact listener on unmount to prevent duplicate updates.
   useEffect(() => {
     function handleResize() {
       setWidth(window.innerWidth);
     }
+
+    handleResize();
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  return <p>Window width: {width}</p>;
+  return <p>Window width: {width ?? 'measuring…'}</p>;
 }

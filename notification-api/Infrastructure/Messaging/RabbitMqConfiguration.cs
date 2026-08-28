@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 using Microsoft.Extensions.Configuration;
 
 namespace NSA.Infrastructure.Messaging;
@@ -64,6 +65,23 @@ public static class RabbitMqConfiguration
         foreach (var constraint in IntegerConstraints)
         {
             _ = GetInt32(configuration, constraint.Key, constraint.Minimum, constraint.Maximum);
+        }
+    }
+
+    /// <summary>
+    /// Validates only the routing metadata captured by the API in Outbox rows.
+    /// Broker connection credentials belong to the relay and consumer hosts.
+    /// </summary>
+    public static void ValidateOutboxEnvelope(IConfiguration configuration)
+    {
+        foreach (var key in new[] { "CommandExchange", "CommandRoutingKey" })
+        {
+            var value = GetRequiredString(configuration, key);
+            if (Encoding.UTF8.GetByteCount(value) >= 255)
+            {
+                throw new InvalidOperationException(
+                    $"Configuration value '{SectionName}:{key}' must be shorter than 255 UTF-8 bytes.");
+            }
         }
     }
 

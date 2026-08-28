@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.Text.Json.Serialization;
 using NSA.Domain.Enums;
 
 namespace NSA.Application.Contracts;
@@ -72,6 +73,12 @@ public sealed record CreateNotificationRequest
     /// <summary>Related order identifier, when applicable.</summary>
     [Range(1, int.MaxValue)]
     public int? OrderId { get; init; }
+
+    [JsonIgnore]
+    public Guid? BulkNotificationJobId { get; init; }
+
+    [JsonIgnore]
+    public long? BulkNotificationJobItemId { get; init; }
 }
 
 /// <summary>Request to replace a notification's editable details and read state.</summary>

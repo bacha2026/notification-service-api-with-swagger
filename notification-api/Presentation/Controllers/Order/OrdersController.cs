@@ -36,18 +36,37 @@ public sealed class OrdersController(IOrderService orderService) : ControllerBas
         return order is null ? NotFound() : Ok(order);
     }
 
-    /// <summary>Places an order and queues admin and visitor notifications.</summary>
-    /// <remarks>Send the visitor email in the request body after the visitor has added items to their cart. The current cart becomes the new order, so the request fails when that cart is empty. Location identifies the order. X-Notification-Handoff reports Confirmed, Unconfirmed, or Rejected. When a persisted job exists, X-Notification-Job-ID and Link identify its progress resource.</remarks>
+    /// <summary>Places an order and durably queues admin and visitor notifications.</summary>
+    /// <remarks>Send the visitor email after adding cart items. The order, cart removal, notification job, and Outbox command commit atomically. An optional X-Idempotency-Key safely replays the original order response.</remarks>
     /// <response code="201">The order was placed. Response headers describe its asynchronous notification handoff.</response>
-    /// <response code="400">The visitor cart is empty.</response>
+    /// <response code="400">The visitor identity or idempotency key is invalid, or the visitor cart is empty.</response>
+    /// <response code="409">The idempotency key was already used for a different checkout request.</response>
+    /// <response code="503">The durable notification job store is at capacity or temporarily unavailable.</response>
     [HttpPost]
     [ProducesResponseType(typeof(OrderDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<ActionResult<OrderDto>> CreateOrder(CreateOrderRequest request, CancellationToken cancellationToken)
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<ActionResult<OrderDto>> CreateOrder(
+        CreateOrderRequest request,
+        [FromHeader(Name = IdempotencyContext.HeaderName)] string? idempotencyKey,
+        CancellationToken cancellationToken)
     {
-        var result = await orderService.CreateOrderAsync(request, cancellationToken);
-        var order = result.Order;
         var requestedVersion = HttpContext.GetRequestedApiVersion();
+        var actor = string.IsNullOrWhiteSpace(request.VisitorEmail)
+            ? "default-visitor"
+            : request.VisitorEmail.Trim().ToUpperInvariant();
+        var idempotency = IdempotencyContext.Create(
+            $"orders.create.v{requestedVersion?.MajorVersion ?? 2}",
+            actor,
+            idempotencyKey);
+        var result = await orderService.CreateOrderAsync(request, idempotency, cancellationToken);
+        if (result.IdempotencyReplayed)
+        {
+            Response.Headers[IdempotencyContext.ReplayHeaderName] = "true";
+        }
+
+        var order = result.Order;
         var location = requestedVersion is null
             ? $"/api/orders/{order.Id}"
             : $"/api/v{requestedVersion.MajorVersion}/orders/{order.Id}";

@@ -586,6 +586,30 @@ a {
   font-weight: 700;
 }
 
+.notification-title {
+  min-width: 0;
+  flex: 1;
+}
+
+.notification-subject-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.page-heading h1.notification-subject {
+  min-width: 0;
+  font-size: 2.1rem;
+  letter-spacing: 0;
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+}
+
+.notification-delete-button {
+  flex: 0 0 auto;
+}
+
 .cart-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(280px, 0.41fr);
@@ -996,6 +1020,10 @@ a {
 }
 
 @media (max-width: 620px) {
+  .page-heading h1.notification-subject {
+    font-size: 1.5rem;
+  }
+
   .site-header {
     min-height: 68px;
     padding: 0 20px;

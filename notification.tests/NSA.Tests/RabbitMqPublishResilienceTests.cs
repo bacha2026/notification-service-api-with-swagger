@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSA.Infrastructure.Messaging;
+using RabbitMQ.Client.Exceptions;
 using Polly.CircuitBreaker;
 
 namespace NSA.Tests;
@@ -34,6 +35,25 @@ public sealed class RabbitMqPublishResilienceTests
             attempts++;
             return attempts < 3
                 ? Task.FromException(new IOException("temporary broker failure"))
+                : Task.CompletedTask;
+        }, CancellationToken.None);
+
+        Assert.Equal(3, attempts);
+    }
+
+    [Fact]
+    public async Task Broker_nack_or_mandatory_return_is_retried_as_a_failed_publication()
+    {
+        var policy = CreatePolicy(retryCount: 2, breakerFailures: 3);
+        var attempts = 0;
+
+        await policy.ExecuteAsync(_ =>
+        {
+            attempts++;
+            return attempts < 3
+                ? Task.FromException(new PublishException(
+                    publishSequenceNumber: (ulong)attempts,
+                    isReturn: attempts == 2))
                 : Task.CompletedTask;
         }, CancellationToken.None);
 
@@ -85,5 +105,5 @@ public sealed class RabbitMqPublishResilienceTests
                     ["RabbitMq:PublishCircuitBreakDurationSeconds"] = "30"
                 })
                 .Build(),
-            NullLogger<RabbitMqBulkNotificationPublisher>.Instance).Policy;
+            NullLogger<RabbitMqOutboxMessagePublisher>.Instance).Policy;
 }

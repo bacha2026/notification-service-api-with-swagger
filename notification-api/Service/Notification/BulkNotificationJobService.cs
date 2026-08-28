@@ -1,21 +1,36 @@
+using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using NSA.Application.Abstractions;
 using NSA.Application.Configuration;
 using NSA.Application.Contracts;
 using NSA.Application.Exceptions;
 using NSA.Domain.Entities;
+using NSA.Infrastructure.Messaging;
+using NSA.Persistence;
 
 namespace NSA.Service;
 
 public sealed class BulkNotificationJobService(
     IBulkNotificationJobRepository jobs,
-    IBulkNotificationCommandPublisher publisher,
+    NotificationDbContext dbContext,
+    IdempotencyStore idempotencyStore,
+    IConfiguration configuration,
     BulkNotificationSettings settings,
-    TimeProvider timeProvider,
-    ILogger<BulkNotificationJobService> logger) : IBulkNotificationJobService
+    TimeProvider timeProvider) : IBulkNotificationJobService
 {
+    private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
+
     public async Task<BulkNotificationJobDto> QueueAsync(
         CreateBulkNotificationsRequest request,
         string correlationId,
+        CancellationToken cancellationToken) =>
+        (await QueueAsync(request, correlationId, idempotency: null, cancellationToken)).Value;
+
+    public async Task<IdempotentResult<BulkNotificationJobDto>> QueueAsync(
+        CreateBulkNotificationsRequest request,
+        string correlationId,
+        IdempotencyContext? idempotency,
         CancellationToken cancellationToken)
     {
         if (request.Notifications is null || request.Notifications.Count == 0)
@@ -29,6 +44,34 @@ public sealed class BulkNotificationJobService(
                 $"A bulk notification job cannot contain more than {settings.MaxBatchSize} notifications.");
         }
 
+        var normalizedItems = request.Notifications.Select(item => new BulkNotificationItemRequest(
+            item.RecipientEmail.Trim(),
+            item.Channel,
+            item.Subject.Trim(),
+            item.Body.Trim(),
+            item.OrderId)).ToArray();
+        var requestHash = IdempotencyRequestHasher.Hash(normalizedItems.Select(item => new
+        {
+            RecipientEmail = item.RecipientEmail.ToUpperInvariant(),
+            item.Channel,
+            item.Subject,
+            item.Body,
+            item.OrderId
+        }));
+
+        await using var transaction = await idempotencyStore.BeginSerializableTransactionAsync(cancellationToken);
+        await idempotencyStore.PurgeExpiredAsync(idempotency, cancellationToken);
+        await idempotencyStore.AcquireLockAsync(idempotency, cancellationToken);
+        var replay = await idempotencyStore.TryReplayAsync<BulkNotificationJobDto>(
+            idempotency,
+            requestHash,
+            cancellationToken);
+        if (replay is not null)
+        {
+            await CommitAsync(transaction, cancellationToken);
+            return replay;
+        }
+
         await RemoveExpiredJobsAsync(cancellationToken);
         var activeJobCount = await jobs.CountActiveAsync(cancellationToken);
         if (activeJobCount >= settings.MaxTrackedJobs)
@@ -39,6 +82,7 @@ public sealed class BulkNotificationJobService(
 
         var now = timeProvider.GetUtcNow();
         var jobId = Guid.NewGuid();
+        var messageId = Guid.NewGuid();
         var normalizedCorrelationId = string.IsNullOrWhiteSpace(correlationId)
             ? jobId.ToString("N")
             : correlationId.Trim()[..Math.Min(correlationId.Trim().Length, 128)];
@@ -50,62 +94,52 @@ public sealed class BulkNotificationJobService(
             CorrelationId = normalizedCorrelationId,
             TotalCount = request.Notifications.Count,
             QueuedAtUtc = now,
-            Items = request.Notifications.Select((item, index) => new BulkNotificationJobItem
+            Items = normalizedItems.Select((item, index) => new BulkNotificationJobItem
             {
                 Sequence = index,
-                RecipientEmail = item.RecipientEmail.Trim(),
+                RecipientEmail = item.RecipientEmail,
                 Channel = item.Channel,
-                Subject = item.Subject.Trim(),
-                Body = item.Body.Trim(),
+                Subject = item.Subject,
+                Body = item.Body,
                 OrderId = item.OrderId,
                 Status = BulkNotificationItemStatuses.Pending
             }).ToList()
         };
 
         jobs.Add(job);
-        await jobs.SaveChangesAsync(cancellationToken);
-
         var command = new BulkNotificationRequestedV1(
             BulkNotificationRequestedV1.CurrentSchemaVersion,
-            Guid.NewGuid(),
+            messageId,
             job.Id,
             job.CorrelationId,
             now);
-
-        try
+        dbContext.OutboxMessages.Add(new OutboxMessage
         {
-            await publisher.PublishAsync(command, cancellationToken);
-        }
-        catch (Exception exception)
-        {
-            job.Status = BulkNotificationJobStatuses.PublishFailed;
-            job.CompletedAtUtc = timeProvider.GetUtcNow();
-            job.Error = "The persisted job could not be published to the message broker.";
+            Id = messageId,
+            AggregateType = nameof(BulkNotificationJob),
+            AggregateId = job.Id.ToString("D"),
+            MessageType = BulkNotificationRequestedV1.MessageType,
+            SchemaVersion = BulkNotificationRequestedV1.CurrentSchemaVersion,
+            Payload = JsonSerializer.Serialize(command, SerializerOptions),
+            Exchange = RabbitMqConfiguration.GetRequiredString(configuration, "CommandExchange"),
+            RoutingKey = RabbitMqConfiguration.GetRequiredString(configuration, "CommandRoutingKey"),
+            CorrelationId = job.CorrelationId,
+            OccurredAtUtc = now,
+            NextAttemptAtUtc = now
+        });
 
-            try
-            {
-                await jobs.SaveChangesAsync(CancellationToken.None);
-            }
-            catch (Exception statusException)
-            {
-                logger.LogError(
-                    statusException,
-                    "Bulk notification job {JobId} publish failure could not be recorded. CorrelationId: {CorrelationId}",
-                    job.Id,
-                    job.CorrelationId);
-            }
+        var response = ToDto(job);
+        idempotencyStore.Add(
+            idempotency,
+            requestHash,
+            StatusCodes.Status202Accepted,
+            response,
+            nameof(BulkNotificationJob),
+            job.Id.ToString("D"));
+        await jobs.SaveChangesAsync(cancellationToken);
+        await CommitAsync(transaction, cancellationToken);
 
-            logger.LogError(
-                exception,
-                "Bulk notification job {JobId} could not be published. CorrelationId: {CorrelationId}",
-                job.Id,
-                job.CorrelationId);
-            throw new BulkNotificationPublishException(
-                "The bulk notification broker handoff could not be confirmed. Try again later.",
-                ToDto(job));
-        }
-
-        return ToDto(job);
+        return new IdempotentResult<BulkNotificationJobDto>(response, Replayed: false);
     }
 
     public async Task<BulkNotificationJobDto?> GetStatusAsync(Guid jobId, CancellationToken cancellationToken)
@@ -124,6 +158,22 @@ public sealed class BulkNotificationJobService(
             return;
         }
 
+        var aggregateIds = expired
+            .Select(job => job.Id.ToString("D"))
+            .ToArray();
+        var jobIds = expired
+            .Select(job => job.Id)
+            .ToArray();
+        var expiredNotifications = await dbContext.Notifications
+            .Where(notification => notification.BulkNotificationJobId.HasValue
+                && jobIds.Contains(notification.BulkNotificationJobId.Value))
+            .ToListAsync(cancellationToken);
+        var expiredOutbox = await dbContext.OutboxMessages
+            .Where(message => message.AggregateType == nameof(BulkNotificationJob)
+                && aggregateIds.Contains(message.AggregateId))
+            .ToListAsync(cancellationToken);
+        dbContext.Notifications.RemoveRange(expiredNotifications);
+        dbContext.OutboxMessages.RemoveRange(expiredOutbox);
         jobs.RemoveRange(expired);
         await jobs.SaveChangesAsync(cancellationToken);
     }
@@ -141,4 +191,9 @@ public sealed class BulkNotificationJobService(
             job.CompletedAtUtc,
             job.Error,
             job.CorrelationId);
+
+    private static Task CommitAsync(
+        IDbContextTransaction? transaction,
+        CancellationToken cancellationToken) =>
+        transaction is null ? Task.CompletedTask : transaction.CommitAsync(cancellationToken);
 }

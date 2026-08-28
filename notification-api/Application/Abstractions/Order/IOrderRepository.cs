@@ -6,7 +6,9 @@ namespace NSA.Application.Abstractions;
 public interface IOrderRepository
 {
     Task<IReadOnlyList<Order>> GetOrdersForVisitorAsync(string visitorEmail, CancellationToken cancellationToken);
+    Task<IReadOnlyList<Order>> GetOrdersForUserAsync(Guid userId, CancellationToken cancellationToken);
     Task<Order?> GetByIdWithItemsAsync(int id, CancellationToken cancellationToken);
+    Task<Order?> GetByIdForUserWithItemsAsync(int id, Guid userId, CancellationToken cancellationToken);
     Task<IReadOnlyList<CartItem>> GetCartItemsForOrderAsync(string visitorEmail, CancellationToken cancellationToken);
     void Add(Order order);
     void RemoveCartItems(IEnumerable<CartItem> cartItems);

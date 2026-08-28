@@ -15,11 +15,27 @@ public sealed class OrderRepository(NotificationDbContext dbContext) : IOrderRep
             .ToListAsync(cancellationToken);
     }
 
+    public async Task<IReadOnlyList<Order>> GetOrdersForUserAsync(Guid userId, CancellationToken cancellationToken)
+    {
+        return await dbContext.Orders
+            .Include(order => order.Items)
+            .Where(order => order.UserId == userId)
+            .OrderByDescending(order => order.CreatedAtUtc)
+            .ToListAsync(cancellationToken);
+    }
+
     public Task<Order?> GetByIdWithItemsAsync(int id, CancellationToken cancellationToken)
     {
         return dbContext.Orders
             .Include(order => order.Items)
             .SingleOrDefaultAsync(order => order.Id == id, cancellationToken);
+    }
+
+    public Task<Order?> GetByIdForUserWithItemsAsync(int id, Guid userId, CancellationToken cancellationToken)
+    {
+        return dbContext.Orders
+            .Include(order => order.Items)
+            .SingleOrDefaultAsync(order => order.Id == id && order.UserId == userId, cancellationToken);
     }
 
     public async Task<IReadOnlyList<CartItem>> GetCartItemsForOrderAsync(string visitorEmail, CancellationToken cancellationToken)

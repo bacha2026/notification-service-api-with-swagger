@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using Polly;
+using Polly.Contrib.WaitAndRetry;
 using RabbitMQ.Client.Exceptions;
 
 namespace NSA.Infrastructure.Messaging;
@@ -8,7 +9,7 @@ public sealed class RabbitMqPublishResiliencePolicyProvider
 {
     public RabbitMqPublishResiliencePolicyProvider(
         IConfiguration configuration,
-        ILogger<RabbitMqBulkNotificationPublisher> logger)
+        ILogger<RabbitMqOutboxMessagePublisher> logger)
     {
         var retryCount = RabbitMqConfiguration.GetInt32(configuration, "PublishRetryCount", 0, 10);
         var initialRetryDelayMilliseconds = RabbitMqConfiguration.GetInt32(
@@ -30,12 +31,13 @@ public sealed class RabbitMqPublishResiliencePolicyProvider
         var retry = global::Polly.Policy
             .Handle<BrokerUnreachableException>()
             .Or<AlreadyClosedException>()
+            .Or<PublishException>()
             .Or<IOException>()
             .Or<TimeoutException>()
             .WaitAndRetryAsync(
-                retryCount,
-                attempt => TimeSpan.FromMilliseconds(
-                    initialRetryDelayMilliseconds * Math.Pow(2, attempt - 1)),
+                Backoff.ExponentialBackoff(
+                    TimeSpan.FromMilliseconds(initialRetryDelayMilliseconds),
+                    retryCount),
                 (exception, delay, attempt, _) => logger.LogWarning(
                     exception,
                     "Retrying RabbitMQ notification command publication after {DelayMilliseconds} ms (retry {RetryAttempt} of {RetryCount})",
@@ -46,6 +48,7 @@ public sealed class RabbitMqPublishResiliencePolicyProvider
         var circuitBreaker = global::Polly.Policy
             .Handle<BrokerUnreachableException>()
             .Or<AlreadyClosedException>()
+            .Or<PublishException>()
             .Or<IOException>()
             .Or<TimeoutException>()
             .CircuitBreakerAsync(

@@ -29,6 +29,21 @@ public sealed record AddCartItemRequest
     public int Quantity { get; init; }
 }
 
+/// <summary>
+/// Adds an item to the cart belonging to the signed-in user. The visitor email
+/// is deliberately omitted because the API derives it from the JWT.
+/// </summary>
+public sealed record AddCurrentUserCartItemRequest
+{
+    /// <summary>Identifier of the product to add.</summary>
+    [Required, Range(1, int.MaxValue)]
+    public int ProductId { get; init; }
+
+    /// <summary>Number of product units to add.</summary>
+    [Required, Range(1, int.MaxValue)]
+    public int Quantity { get; init; }
+}
+
 /// <summary>Request to change the quantity of an item in a cart.</summary>
 public sealed record UpdateCartItemRequest
 {

@@ -1,0 +1,23 @@
+<section class="list-card" aria-labelledby="list-heading">
+  <header>
+    <div>
+      <p>OnPush child component</p>
+      <h2 id="list-heading">Rendered notifications</h2>
+    </div>
+    <strong data-testid="rendered-count">{{ notifications().length }} visible</strong>
+  </header>
+
+  <ul>
+    @for (notification of notifications(); track notification.id) {
+      <li data-testid="notification-row">
+        <span>{{ notification.id }}</span>
+        <div>
+          <h3>{{ notification.subject }}</h3>
+          <p>{{ notification.detail }}</p>
+        </div>
+      </li>
+    } @empty {
+      <li>No notifications to render.</li>
+    }
+  </ul>
+</section>

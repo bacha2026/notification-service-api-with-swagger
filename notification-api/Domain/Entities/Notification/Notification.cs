@@ -14,6 +14,8 @@ public sealed class Notification
     public bool IsRead { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; }
     public DateTimeOffset? SentAtUtc { get; set; }
+    public Guid? BulkNotificationJobId { get; set; }
+    public long? BulkNotificationJobItemId { get; set; }
 
     public static Notification Create(string recipientEmail, NotificationChannel channel, string subject, string body, int? orderId, DateTimeOffset createdAtUtc)
     {
@@ -46,6 +48,17 @@ public sealed class Notification
     public void MarkAsSent(DateTimeOffset sentAtUtc)
     {
         SentAtUtc = sentAtUtc;
+    }
+
+    public void MarkAsRead()
+    {
+        IsRead = true;
+    }
+
+    public void AssociateWithBulkJob(Guid jobId, long jobItemId)
+    {
+        BulkNotificationJobId = jobId;
+        BulkNotificationJobItemId = jobItemId;
     }
 
     private static void Validate(string recipientEmail, NotificationChannel channel, string subject, string body)

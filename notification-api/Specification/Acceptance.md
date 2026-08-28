@@ -14,33 +14,47 @@
 - Notification CRUD endpoints support create, read, update, and delete operations.
 - Notification creation, updates, required-field validation, and sent-state changes are owned by the Notification domain entity.
 - Controllers contain endpoint routing and HTTP response shaping while application services handle persistence, DTO mapping, and workflow coordination.
-- The worker creates persisted notification records and does not call an external email provider. Polly retry and circuit breaking protect outbound RabbitMQ notification-command publication.
-- Bulk email items are persisted and passed through `INotificationDispatcher`; non-email bulk items are persisted as notification records. A bulk item succeeds when its Week 2 record-processing flow completes, while `SentAtUtc` means an enabled provider accepted the email. Job status exposes only safe summary errors.
+- The worker creates persisted notification records and does not claim delivery through an external email provider. A bulk item succeeds when its notification record and durable Inbox receipt commit.
+- Polly retry and circuit breaking protect the Outbox Relay's outbound RabbitMQ publication, including connection failures and broker negative acknowledgements or mandatory returns. Failed Outbox rows remain pending with bounded backoff.
 - API v1 and v2 publish separate OpenAPI documents with concrete versioned paths; legacy unversioned routes remain documented in v2 only.
 - All versioned and compatibility business-API error paths return RFC 7807 Problem Details, and deprecated v1 responses include `Deprecation` and `Sunset` headers. Operational `/health/*` endpoints intentionally use the health-check status contract instead of the business API error contract.
-- Outbound email attempts use a per-attempt timeout, three exponential retries, and a circuit breaker around each exhausted logical operation.
 - Database seed data includes products, cart items, orders, order items, and notification records for visitor@example.test and admin@example.test.
-- The API creates or updates NotificationServiceDb on startup through EF Core migrations.
+- The Development and Week 3 training profiles can apply EF Core migrations on API startup. Production-style profiles disable that behavior and use the one-shot `NSA.Migrator` host.
 - OpenAPI 3.0 is exposed through Swashbuckle at /swagger with XML endpoint comments.
 
 ## Week 3 messaging and deployment acceptance
 
-- The API, `NSA.Worker`, and `NSA.Dlq.Worker` are separate executable projects and are included in the root solution build.
+- The API, `NSA.Outbox.Worker`, `NSA.Worker`, and `NSA.Dlq.Worker` are separate executable projects and are included in the root solution build.
 - Bulk jobs and items are persisted in SQL Server before publication; status is read from SQL and remains queryable independently of the worker process.
-- The API publishes a persistent, versioned RabbitMQ command with publisher-confirmation tracking and returns `202 Accepted` only after the broker accepts the command.
+- The API atomically persists each job, its items, and a stable versioned Outbox command and returns `202 Accepted` after SQL commits; the relay publishes with confirmation tracking.
 - Broker commands contain stable job/message/correlation identifiers and timestamps, but no recipient address, subject, or body.
 - RabbitMQ declares durable command, dead-letter, recovery-delay, and parking exchanges/queues with stable names.
 - The WorkerService uses manual acknowledgement and acknowledges successful work only after durable SQL progress is saved.
 - Retryable command failures are bounded to three application attempts; exhausted commands and non-retryable malformed, unsupported-schema, or wrong-type commands reach the named DLQ.
 - Duplicate commands for completed jobs are acknowledged without replay; commands for already dead-lettered jobs are rejected back to the DLQ.
 - The DLQ Recovery Worker only replays commands explicitly rejected from the main queue. It marks a matching SQL job `RecoveryPending`, clears the exhausted application retry header, publish-confirms to the recovery queue, and then acknowledges the DLQ delivery. Malformed, unknown, non-rejected, and replay-limit-exhausted messages are parked durably.
-- The five-service Docker Compose stack starts SQL Server, RabbitMQ Management, API, WorkerService, and DLQ Recovery Worker with named volumes, a named network, dependency health checks, ignored local credentials, and loopback-only host ports.
-- `/health/live` is process-only. `/health/ready` verifies both SQL Server and RabbitMQ with bounded timeouts. Worker readiness requires an active consumer and recent SQL connectivity.
-- Runtime evidence covers happy completion, worker stop-before-ack redelivery, broker reconnection, in-flight broker restart, publish failure, malformed/schema/type rejection, bounded poison handling, identifier correlation, and DLQ inspection.
+- The six-service Docker Compose stack starts SQL Server, RabbitMQ Management, API, Outbox Relay, WorkerService, and DLQ Recovery Worker with named volumes, a named network, dependency health checks, ignored local credentials, and loopback-only host ports.
+- `/health/live` is process-only. API `/health/ready` verifies SQL Server so durable admission stays available during broker downtime. Relay readiness verifies SQL and RabbitMQ even with an empty backlog; consumer readiness requires an active consumer and recent SQL connectivity.
+- The live runtime verification procedures must cover happy completion, worker stop-before-ack redelivery, broker reconnection, in-flight broker restart, publish failure, malformed/schema/type rejection, bounded poison handling, identifier correlation, and retained-DLQ inspection. Generated evidence is run-specific and is not treated as source code.
 
-## Week 4–6 compatibility boundaries
+## Week 4 idempotency and Outbox acceptance
 
-- The stack is explicitly at-least-once. Transactional Outbox publication, Inbox/deduplication, `X-Idempotency-Key`, stable provider idempotency, and full reconciliation are not claimed.
+- `POST /api/v2/notifications/bulk` and guest/authenticated order creation accept an optional `X-Idempotency-Key` without breaking clients that omit it.
+- The same scoped key and semantic request replays the original response and IDs with `Idempotency-Replayed: true`. A changed bulk payload returns RFC 7807 `409 Conflict`, and an invalid key returns `400`.
+- Only a SHA-256 key hash is stored. Receipts survive explicit notification/job deletion for the configured replay lifetime.
+- Authenticated checkout commits the order, cart removal, notification job/items, Outbox command, and optional idempotency receipt in one SQL transaction.
+- Outbox commands own the stable broker `MessageId`, versioned payload, correlation ID, exchange, and routing key. The relay uses conditional leases, publisher confirms, exponential backoff with jitter, and never drops a failed row.
+- Broker downtime does not fail API readiness or durable HTTP admission. After RabbitMQ returns, the relay drains pending rows.
+- The consumer records a composite `(MessageId, Handler)` Inbox receipt in the same successful transaction as message effects, before ACK. Retryable failures do not create a receipt.
+- Explicit notification deletion removes the notification aggregate, job/items, and matching pending/published Outbox rows; it retains Inbox and idempotency receipts to suppress late duplicates and preserve replay semantics.
+- The authenticated feed derives the recipient email from the JWT and returns fields only for `Completed` jobs with `Succeeded` items; it does not claim order-ownership authorization for notification rows.
+- Completed jobs referenced by visible notifications are excluded from opportunistic retention cleanup. Expired `CompletedWithErrors` graphs are removed with their hidden notifications and Outbox rows, while `DeadLettered`, `RecoveryPending`, and legacy `PublishFailed` jobs remain recoverable/readable.
+- Legacy notification CRUD remains an anonymous compatibility/training surface and requires a future admin/service authorization policy before production exposure; it is not part of the account-feed privacy boundary.
+- The transport remains explicitly at-least-once because broker publish and the Outbox published mark cannot be atomic. Inbox processing makes committed application effects idempotent.
+
+## Week 5–6 compatibility boundaries
+
+- Stable provider-side idempotency and full reconciliation are not claimed.
 - Public contracts and versioned broker messages evolve additively; database changes use expand/contract rules so old and new deployment colors can overlap safely.
 - API and worker remain stateless apart from SQL/RabbitMQ state, expose dependency-aware readiness, and keep secrets in configuration seams suitable for later Vault integration.
 - The `Projects` workspace is the Git root, so the API, Worker, tests, documentation, Next.js, and Angular applications can share one CI checkout.

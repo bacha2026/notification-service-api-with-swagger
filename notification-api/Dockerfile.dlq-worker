@@ -1,12 +1,14 @@
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:8.0@sha256:306301580fcaa5b445180e759db59309979002d1000669cb4cf58a567d0014bc AS build
 WORKDIR /src
 
 COPY notification-api/NSA.csproj notification-api/
+COPY notification.core/NSA.Core.csproj notification.core/
 COPY notification.worker.shared/NSA.Worker.Shared.csproj notification.worker.shared/
 COPY notification.dlq.worker/NSA.Dlq.Worker.csproj notification.dlq.worker/
 RUN dotnet restore "notification.dlq.worker/NSA.Dlq.Worker.csproj"
 
 COPY notification-api/ notification-api/
+COPY notification.core/ notification.core/
 COPY notification.worker.shared/ notification.worker.shared/
 COPY notification.dlq.worker/ notification.dlq.worker/
 RUN dotnet publish "notification.dlq.worker/NSA.Dlq.Worker.csproj" \
@@ -15,7 +17,7 @@ RUN dotnet publish "notification.dlq.worker/NSA.Dlq.Worker.csproj" \
     --output /app/publish \
     /p:UseAppHost=false
 
-FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS final
+FROM mcr.microsoft.com/dotnet/aspnet:8.0@sha256:b0beb9cc1dee1c1b0749796110d4734292071b814207ad0d4f40611f7db04f7b AS final
 WORKDIR /app
 COPY --from=build /app/publish .
 USER app

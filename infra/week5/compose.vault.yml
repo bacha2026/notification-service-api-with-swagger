@@ -1,0 +1,49 @@
+name: nsa-week5
+
+services:
+  vault-permissions:
+    image: hashicorp/vault:1.21.4@sha256:4e33b126a59c0c333b76fb4e894722462659a6bec7c48c9ee8cea56fccfd2569
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-ec", "chown -R 100:1000 /vault/data && chmod 700 /vault/data"]
+    network_mode: none
+    volumes:
+      - vault-data:/vault/data
+    restart: "no"
+
+  vault:
+    image: hashicorp/vault:1.21.4@sha256:4e33b126a59c0c333b76fb4e894722462659a6bec7c48c9ee8cea56fccfd2569
+    # The image entrypoint already supplies -config=/vault/config. Passing the
+    # file again would load the listener twice and make port 8200 collide.
+    command: server
+    cap_add:
+      - IPC_LOCK
+    ports:
+      - "127.0.0.1:8200:8200"
+    volumes:
+      - vault-data:/vault/data
+      - ./vault/config/vault.hcl:/vault/config/vault.hcl:ro
+    networks:
+      - backend
+      - management
+    healthcheck:
+      test: ["CMD", "vault", "status", "-address=http://127.0.0.1:8200"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    depends_on:
+      vault-permissions:
+        condition: service_completed_successfully
+
+volumes:
+  vault-data:
+    name: nsa-week5-vault-data
+
+networks:
+  backend:
+    name: nsa-week5-backend
+    driver: bridge
+    internal: true
+  management:
+    name: nsa-week5-management
+    driver: bridge

@@ -4,6 +4,7 @@ using NSA.Application.Contracts;
 using NSA.Application.Exceptions;
 using NSA.Domain.Entities;
 using NSA.Domain.Enums;
+using NSA.Persistence;
 
 namespace NSA.Service;
 
@@ -11,18 +12,24 @@ public sealed class OrderService(
     IOrderRepository orderRepository,
     INotificationService notificationService,
     IBulkNotificationJobService bulkNotificationJobs,
+    NotificationDbContext dbContext,
+    IdempotencyStore idempotencyStore,
     NotificationRecipientSettings recipientSettings,
-    IApplicationStopping applicationStopping,
     ICorrelationIdProvider correlationIdProvider,
-    TimeProvider timeProvider,
-    ILogger<OrderService> logger) : IOrderService
+    TimeProvider timeProvider) : IOrderService
 {
-    private static readonly TimeSpan PostCommitHandoffTimeout = TimeSpan.FromSeconds(15);
-
     public async Task<IReadOnlyList<OrderDto>> GetOrdersAsync(string visitorEmail, CancellationToken cancellationToken)
     {
         var email = ResolveVisitorEmail(visitorEmail);
         var orders = await orderRepository.GetOrdersForVisitorAsync(email, cancellationToken);
+
+        return orders.Select(ToDto).ToList();
+    }
+
+    public async Task<IReadOnlyList<OrderDto>> GetOrdersForUserAsync(Guid userId, CancellationToken cancellationToken)
+    {
+        EnsureAuthenticatedUserId(userId);
+        var orders = await orderRepository.GetOrdersForUserAsync(userId, cancellationToken);
 
         return orders.Select(ToDto).ToList();
     }
@@ -33,22 +40,103 @@ public sealed class OrderService(
         return order is null ? null : ToDto(order);
     }
 
-    public async Task<CreateOrderResult> CreateOrderAsync(CreateOrderRequest request, CancellationToken cancellationToken)
+    public async Task<OrderDto?> GetOrderForUserAsync(int id, Guid userId, CancellationToken cancellationToken)
+    {
+        EnsureAuthenticatedUserId(userId);
+        var order = await orderRepository.GetByIdForUserWithItemsAsync(id, userId, cancellationToken);
+        return order is null ? null : ToDto(order);
+    }
+
+    public Task<CreateOrderResult> CreateOrderAsync(CreateOrderRequest request, CancellationToken cancellationToken)
+        => CreateOrderAsync(request, idempotency: null, cancellationToken);
+
+    public Task<CreateOrderResult> CreateOrderAsync(
+        CreateOrderRequest request,
+        IdempotencyContext? idempotency,
+        CancellationToken cancellationToken)
     {
         var visitorEmail = ResolveVisitorEmail(request.VisitorEmail);
+        return CreateOrderAsync(visitorEmail, userId: null, idempotency, cancellationToken);
+    }
+
+    public Task<CreateOrderResult> CreateOrderForUserAsync(
+        Guid userId,
+        string visitorEmail,
+        CancellationToken cancellationToken) =>
+        CreateOrderForUserAsync(userId, visitorEmail, idempotency: null, cancellationToken);
+
+    public Task<CreateOrderResult> CreateOrderForUserAsync(
+        Guid userId,
+        string visitorEmail,
+        IdempotencyContext? idempotency,
+        CancellationToken cancellationToken)
+    {
+        EnsureAuthenticatedUserId(userId);
+        return CreateOrderAsync(
+            NormalizeRequiredVisitorEmail(visitorEmail),
+            userId,
+            idempotency,
+            cancellationToken);
+    }
+
+    private async Task<CreateOrderResult> CreateOrderAsync(
+        string visitorEmail,
+        Guid? userId,
+        IdempotencyContext? idempotency,
+        CancellationToken cancellationToken)
+    {
+        var requestHash = IdempotencyRequestHasher.Hash(
+            new OrderAdmissionRequest(visitorEmail.ToUpperInvariant()));
+        await using var transaction = await idempotencyStore.BeginSerializableTransactionAsync(cancellationToken);
+        await idempotencyStore.PurgeExpiredAsync(idempotency, cancellationToken);
+        await idempotencyStore.AcquireLockAsync(idempotency, cancellationToken);
+        var replay = await idempotencyStore.TryReplayAsync<CreateOrderResult>(
+            idempotency,
+            requestHash,
+            cancellationToken);
+        if (replay is not null)
+        {
+            if (transaction is not null)
+            {
+                await transaction.CommitAsync(cancellationToken);
+            }
+
+            return replay.Value with { IdempotencyReplayed = true };
+        }
+
         var cartItems = await orderRepository.GetCartItemsForOrderAsync(visitorEmail, cancellationToken);
         if (cartItems.Count == 0)
         {
             throw new RequestValidationException("The cart is empty.");
         }
 
-        var order = Order.CreateFromCart(visitorEmail, cartItems, timeProvider.GetUtcNow());
+        var order = Order.CreateFromCart(visitorEmail, cartItems, timeProvider.GetUtcNow(), userId);
         orderRepository.Add(order);
         orderRepository.RemoveCartItems(cartItems);
         await orderRepository.SaveChangesAsync(cancellationToken);
 
-        var handoff = await QueueOrderPlacedNotificationsSafelyAsync(order);
-        return new CreateOrderResult(ToDto(order), handoff.Job, handoff.Status);
+        var job = await bulkNotificationJobs.QueueAsync(
+            CreateOrderPlacedNotificationRequest(order),
+            correlationIdProvider.CurrentCorrelationId ?? $"order-{order.Id}",
+            cancellationToken);
+        var result = new CreateOrderResult(
+            ToDto(order),
+            job,
+            NotificationHandoffStatus.Confirmed);
+        idempotencyStore.Add(
+            idempotency,
+            requestHash,
+            StatusCodes.Status201Created,
+            result,
+            nameof(Order),
+            order.Id.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        await dbContext.SaveChangesAsync(cancellationToken);
+        if (transaction is not null)
+        {
+            await transaction.CommitAsync(cancellationToken);
+        }
+
+        return result;
     }
 
     public async Task<OrderDto?> UpdateStatusAsync(int id, UpdateOrderStatusRequest request, CancellationToken cancellationToken)
@@ -107,11 +195,10 @@ public sealed class OrderService(
 
     private string AdminEmail => recipientSettings.AdminEmail;
 
-    private async Task<(BulkNotificationJobDto? Job, NotificationHandoffStatus Status)>
-        QueueOrderPlacedNotificationsSafelyAsync(Order order)
+    private CreateBulkNotificationsRequest CreateOrderPlacedNotificationRequest(Order order)
     {
         var body = BuildOrderMessage(order);
-        var request = new CreateBulkNotificationsRequest(
+        return new CreateBulkNotificationsRequest(
         [
             new BulkNotificationItemRequest(
                 AdminEmail,
@@ -126,46 +213,6 @@ public sealed class OrderService(
                 body,
                 order.Id)
         ]);
-
-        try
-        {
-            using var handoffTimeout = CancellationTokenSource.CreateLinkedTokenSource(
-                applicationStopping.StoppingToken);
-            handoffTimeout.CancelAfter(PostCommitHandoffTimeout);
-
-            var job = await bulkNotificationJobs.QueueAsync(
-                request,
-                correlationIdProvider.CurrentCorrelationId ?? $"order-{order.Id}",
-                handoffTimeout.Token);
-            return (job, NotificationHandoffStatus.Confirmed);
-        }
-        catch (BulkNotificationPublishException exception)
-        {
-            logger.LogWarning(
-                exception,
-                "Order {OrderId} was saved, but notification command handoff for job {JobId} could not be confirmed",
-                order.Id,
-                exception.Job.JobId);
-            return (exception.Job, NotificationHandoffStatus.Unconfirmed);
-        }
-        catch (BulkNotificationCapacityException exception)
-        {
-            logger.LogWarning(
-                exception,
-                "Order {OrderId} was saved, but notification job admission was rejected at capacity",
-                order.Id);
-            return (null, NotificationHandoffStatus.Rejected);
-        }
-        catch (OperationCanceledException exception)
-            when (!applicationStopping.StoppingToken.IsCancellationRequested)
-        {
-            logger.LogWarning(
-                exception,
-                "Order {OrderId} was saved, but notification job handoff exceeded the {TimeoutSeconds}-second limit",
-                order.Id,
-                PostCommitHandoffTimeout.TotalSeconds);
-            return (null, NotificationHandoffStatus.Rejected);
-        }
     }
 
     private Task<NotificationDto> CreateNotificationAsync(
@@ -196,6 +243,14 @@ public sealed class OrderService(
         return visitorEmail.Trim();
     }
 
+    private static void EnsureAuthenticatedUserId(Guid userId)
+    {
+        if (userId == Guid.Empty)
+        {
+            throw new RequestValidationException("An authenticated user identifier is required.");
+        }
+    }
+
     private static OrderDto ToDto(Order order)
     {
         return new OrderDto(
@@ -215,4 +270,6 @@ public sealed class OrderService(
         var lines = order.Items.Select(item => $"{item.ProductName} x {item.Quantity} @ {item.UnitPrice:C} = {item.Subtotal:C}");
         return $"Order #{order.Id} for {order.VisitorEmail}. Status: {order.OrderStatus}; Payment: {order.PaymentStatus}; Fulfillment: {order.FulfillmentStatus}; Delivery: {order.DeliveryStatus}. Total: {order.TotalAmount:C}. Items: {string.Join("; ", lines)}";
     }
+
+    private sealed record OrderAdmissionRequest(string VisitorEmail);
 }

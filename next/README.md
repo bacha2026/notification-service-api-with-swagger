@@ -1,4 +1,15 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+This is the Urban Grit storefront and its Next.js rendering lab.
+
+## Rendering lab
+
+The `/rendering` route links to four production rendering demonstrations:
+
+- `/rendering/ssg` is generated once during `next build`.
+- `/rendering/ssr` is rendered for every request with `connection()`.
+- `/rendering/isr` uses a five-second revalidation window.
+- `/rendering/csr` fetches from the no-store `/api/rendering-snapshot` route after hydration.
+
+All demo data is generated locally. It does not require the notification API or any public network endpoint.
 
 ## Getting Started
 
@@ -15,6 +26,33 @@ bun dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+
+## Verification
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+npm run build
+npx playwright install chromium
+npm run test:e2e
+```
+
+The Playwright suite runs against the standalone production server and verifies the cache behavior of all four modes.
+
+The ten corrected hook fragments and their dependency/cleanup explanations are indexed in
+[`snippets-fixed/README.md`](./snippets-fixed/README.md).
+
+Set `RELEASE_ID` for local builds or pass `--build-arg RELEASE_ID=<commit-sha>` to the Docker build so every rendering snapshot identifies its immutable release.
+
+`GET /health/version` reads `RELEASE_COLOR` and `RELEASE_ID` at runtime and returns the active web
+artifact as `{ service, color, sha }`, with matching `X-Release-Color` and `X-Release-Sha` headers. The
+container health check calls this endpoint. Runtime environment variables can override the image defaults;
+for example:
+
+```bash
+docker run --rm -p 3000:3000 -e RELEASE_COLOR=blue -e RELEASE_ID=<commit-sha> rendering-lab
+```
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 

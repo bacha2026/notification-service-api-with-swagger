@@ -1,17 +1,24 @@
 using System.Reflection;
 using System.Diagnostics;
+using System.Security.Claims;
+using System.Text;
+using System.Threading.RateLimiting;
 using Asp.Versioning;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
+using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using NSA.Application.Abstractions;
 using NSA.Application.Configuration;
+using NSA.Infrastructure.Authentication;
 using NSA.Infrastructure.Configuration;
 using NSA.Infrastructure.Health;
-using NSA.Infrastructure.Hosting;
 using NSA.Infrastructure.Messaging;
 using NSA.Infrastructure.Observability;
 using NSA.Persistence;
@@ -21,6 +28,24 @@ using NSA.Presentation.OpenApi;
 using NSA.Service;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Configuration.AddKeyPerFile("/run/secrets", optional: true);
+const string FrontendCorsPolicy = "frontend";
+const string AuthenticationRateLimitPolicy = "authentication";
+var releaseColor = builder.Configuration["Release:Color"] ?? "local";
+var releaseSha = builder.Configuration["Release:Sha"] ?? "development";
+var frontendOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins")
+    .Get<string[]>()?
+    .Where(origin => Uri.TryCreate(origin, UriKind.Absolute, out _))
+    .Distinct(StringComparer.OrdinalIgnoreCase)
+    .ToArray() ?? [];
+var jwtConfiguration = builder.Configuration.GetSection(JwtOptions.SectionName).Get<JwtOptions>();
+if (jwtConfiguration is null
+    || string.IsNullOrWhiteSpace(jwtConfiguration.SigningKey)
+    || Encoding.UTF8.GetByteCount(jwtConfiguration.SigningKey) < 32)
+{
+    throw new InvalidOperationException(
+        "Authentication:Jwt:SigningKey must be supplied by a secret configuration provider and contain at least 32 UTF-8 bytes.");
+}
 
 builder.Services.AddProblemDetails(options =>
 {
@@ -32,6 +57,57 @@ builder.Services.AddProblemDetails(options =>
 });
 builder.Services.AddExceptionHandler<ApiExceptionHandler>();
 builder.Services.AddControllers();
+if (frontendOrigins.Length > 0)
+{
+    builder.Services.AddCors(options => options.AddPolicy(FrontendCorsPolicy, policy => policy
+        .WithOrigins(frontendOrigins)
+        .AllowAnyHeader()
+        .AllowAnyMethod()));
+}
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddPolicy(AuthenticationRateLimitPolicy, context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 10,
+                Window = TimeSpan.FromMinutes(1),
+                QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                QueueLimit = 0,
+                AutoReplenishment = true
+            }));
+});
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.RequireHttpsMetadata = true;
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtConfiguration.SigningKey)),
+            ValidateIssuer = true,
+            ValidIssuer = jwtConfiguration.Issuer,
+            ValidateAudience = true,
+            ValidAudience = jwtConfiguration.Audience,
+            ValidateLifetime = true,
+            ClockSkew = TimeSpan.Zero,
+            NameClaimType = ClaimTypes.Name,
+            RoleClaimType = ClaimTypes.Role
+        };
+    });
+builder.Services.AddAuthorization();
+if (builder.Configuration.GetValue("ReverseProxy:TrustForwardedHeaders", false))
+{
+    builder.Services.Configure<ForwardedHeadersOptions>(options =>
+    {
+        options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+        options.ForwardLimit = 1;
+        options.KnownNetworks.Clear();
+        options.KnownProxies.Clear();
+    });
+}
 builder.Services.AddApiVersioning(options =>
 {
     options.DefaultApiVersion = new ApiVersion(2, 0);
@@ -54,15 +130,19 @@ if (builder.Configuration.GetValue("HealthChecks:DependencyChecksEnabled", true)
             "sql-server",
             failureStatus: HealthStatus.Unhealthy,
             tags: ["ready"],
-            timeout: TimeSpan.FromSeconds(3))
-        .AddCheck<RabbitMqReadinessHealthCheck>(
-            "rabbitmq",
-            failureStatus: HealthStatus.Unhealthy,
-            tags: ["ready"],
             timeout: TimeSpan.FromSeconds(3));
 }
 builder.Services.AddSwaggerGen(options =>
 {
+    options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+    {
+        Description = "JWT authorization header using the Bearer scheme. Example: `Bearer {token}`",
+        Name = "Authorization",
+        In = ParameterLocation.Header,
+        Type = SecuritySchemeType.Http,
+        Scheme = "bearer",
+        BearerFormat = "JWT"
+    });
     options.SwaggerDoc("v1", new OpenApiInfo
     {
         Title = "Notification Service API",
@@ -76,9 +156,14 @@ builder.Services.AddSwaggerGen(options =>
         Description = "Current version of the order tracking and notification API."
     });
 
-    var xmlFile = $"{Assembly.GetExecutingAssembly().GetName().Name}.xml";
-    var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
-    options.IncludeXmlComments(xmlPath, includeControllerXmlComments: true);
+    foreach (var xmlFile in new[] { "NSA.xml", "NSA.Core.xml" })
+    {
+        var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
+        if (File.Exists(xmlPath))
+        {
+            options.IncludeXmlComments(xmlPath, includeControllerXmlComments: true);
+        }
+    }
     options.SchemaFilter<ProblemDetailsSchemaFilter>();
     options.DocInclusionPredicate((documentName, apiDescription) =>
     {
@@ -91,6 +176,7 @@ builder.Services.AddSwaggerGen(options =>
         return !isLegacyUnversionedRoute || string.Equals(documentName, "v2", StringComparison.OrdinalIgnoreCase);
     });
     options.OperationFilter<ProblemDetailsOperationFilter>();
+    options.OperationFilter<BearerSecurityOperationFilter>();
 });
 
 builder.Services.AddDbContext<NotificationDbContext>(options =>
@@ -101,10 +187,12 @@ builder.Services.AddScoped<INotificationRepository, NotificationRepository>();
 builder.Services.AddScoped<IOrderRepository, OrderRepository>();
 builder.Services.AddScoped<IProductRepository, ProductRepository>();
 builder.Services.AddScoped<IBulkNotificationJobRepository, BulkNotificationJobRepository>();
+builder.Services.AddScoped<IUserRepository, UserRepository>();
 builder.Services.AddScoped<ICartService, CartService>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
 builder.Services.AddScoped<IOrderService, OrderService>();
 builder.Services.AddScoped<IProductService, ProductService>();
+builder.Services.AddScoped<IAuthenticationService, AuthenticationService>();
 builder.Services.AddOptions<BulkNotificationOptions>()
     .Bind(builder.Configuration.GetSection(BulkNotificationOptions.SectionName))
     .ValidateDataAnnotations()
@@ -112,6 +200,20 @@ builder.Services.AddOptions<BulkNotificationOptions>()
 builder.Services.AddOptions<NotificationRecipientOptions>()
     .Bind(builder.Configuration.GetSection(NotificationRecipientOptions.SectionName))
     .ValidateDataAnnotations()
+    .ValidateOnStart();
+builder.Services.AddOptions<AuthenticationOptions>()
+    .Bind(builder.Configuration.GetSection(AuthenticationOptions.SectionName))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
+builder.Services.AddOptions<DurabilityOptions>()
+    .Bind(builder.Configuration.GetSection(DurabilityOptions.SectionName))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
+builder.Services.AddOptions<JwtOptions>()
+    .Bind(builder.Configuration.GetSection(JwtOptions.SectionName))
+    .ValidateDataAnnotations()
+    .Validate(options => Encoding.UTF8.GetByteCount(options.SigningKey) >= 32,
+        "Authentication:Jwt:SigningKey must contain at least 32 UTF-8 bytes.")
     .ValidateOnStart();
 builder.Services.AddSingleton(serviceProvider =>
 {
@@ -126,21 +228,21 @@ builder.Services.AddSingleton(serviceProvider =>
     var options = serviceProvider.GetRequiredService<IOptions<NotificationRecipientOptions>>().Value;
     return new NotificationRecipientSettings(options.AdminEmail, options.DefaultVisitorEmail);
 });
+builder.Services.AddSingleton(serviceProvider =>
+{
+    var options = serviceProvider.GetRequiredService<IOptions<AuthenticationOptions>>().Value;
+    return new AuthenticationSettings(options.MaxFailedAccessAttempts, TimeSpan.FromMinutes(options.LockoutMinutes));
+});
+builder.Services.AddSingleton(serviceProvider =>
+    serviceProvider.GetRequiredService<IOptions<DurabilityOptions>>().Value);
 builder.Services.AddSingleton(TimeProvider.System);
-builder.Services.AddSingleton<IApplicationStopping, HostApplicationStopping>();
+builder.Services.AddSingleton<IPasswordHasher, AspNetPasswordHasher>();
+builder.Services.AddSingleton<IAccessTokenIssuer, JwtAccessTokenIssuer>();
 builder.Services.AddSingleton<ICorrelationIdProvider, ActivityCorrelationIdProvider>();
-RabbitMqConfiguration.Validate(builder.Configuration);
-builder.Services.AddSingleton<RabbitMqPublishResiliencePolicyProvider>();
-builder.Services.AddSingleton<RabbitMqBulkNotificationPublisher>();
+RabbitMqConfiguration.ValidateOutboxEnvelope(builder.Configuration);
 builder.Services.AddSingleton<IBulkNotificationFailureInjector, ConfiguredBulkNotificationFailureInjector>();
-builder.Services.AddSingleton<IBulkNotificationCommandPublisher>(serviceProvider =>
-    serviceProvider.GetRequiredService<RabbitMqBulkNotificationPublisher>());
-builder.Services.AddScoped<IBulkNotificationJobService>(serviceProvider => new BulkNotificationJobService(
-    serviceProvider.GetRequiredService<IBulkNotificationJobRepository>(),
-    serviceProvider.GetRequiredService<IBulkNotificationCommandPublisher>(),
-    serviceProvider.GetRequiredService<BulkNotificationSettings>(),
-    serviceProvider.GetRequiredService<TimeProvider>(),
-    serviceProvider.GetRequiredService<ILogger<BulkNotificationJobService>>()));
+builder.Services.AddScoped<IdempotencyStore>();
+builder.Services.AddScoped<IBulkNotificationJobService, BulkNotificationJobService>();
 
 var app = builder.Build();
 
@@ -149,6 +251,14 @@ if (builder.Configuration.GetValue("Database:ApplyMigrationsOnStartup", true))
     using var scope = app.Services.CreateScope();
     var dbContext = scope.ServiceProvider.GetRequiredService<NotificationDbContext>();
     await dbContext.Database.MigrateAsync();
+}
+
+// Forwarded headers must be applied before HTTPS decisions, rate limiting,
+// authentication, and endpoint execution so those components see the original
+// scheme and the right-most client address supplied by the trusted proxy hop.
+if (builder.Configuration.GetValue("ReverseProxy:TrustForwardedHeaders", false))
+{
+    app.UseForwardedHeaders();
 }
 
 app.UseSwagger();
@@ -164,21 +274,10 @@ if (builder.Configuration.GetValue("HttpsRedirection:Enabled", true))
     app.UseHttpsRedirection();
 }
 app.UseExceptionHandler();
-app.Use(async (context, next) =>
+if (frontendOrigins.Length > 0)
 {
-    context.Response.OnStarting(() =>
-    {
-        if (context.GetRequestedApiVersion()?.MajorVersion == 1)
-        {
-            context.Response.Headers.TryAdd("Deprecation", "true");
-            context.Response.Headers.TryAdd("Sunset", "Thu, 31 Dec 2026 23:59:59 GMT");
-        }
-
-        return Task.CompletedTask;
-    });
-
-    await next();
-});
+    app.UseCors(FrontendCorsPolicy);
+}
 app.UseStatusCodePages(async statusCodeContext =>
 {
     var httpContext = statusCodeContext.HttpContext;
@@ -195,6 +294,27 @@ app.UseStatusCodePages(async statusCodeContext =>
         }
     });
 });
+app.UseRateLimiter();
+app.UseAuthentication();
+app.UseAuthorization();
+app.Use(async (context, next) =>
+{
+    context.Response.OnStarting(() =>
+    {
+        context.Response.Headers["X-Release-Color"] = releaseColor;
+        context.Response.Headers["X-Release-Sha"] = releaseSha;
+
+        if (context.GetRequestedApiVersion()?.MajorVersion == 1)
+        {
+            context.Response.Headers.TryAdd("Deprecation", "true");
+            context.Response.Headers.TryAdd("Sunset", "Thu, 31 Dec 2026 23:59:59 GMT");
+        }
+
+        return Task.CompletedTask;
+    });
+
+    await next();
+});
 app.MapControllers();
 app.MapHealthChecks("/health/live", new HealthCheckOptions
 {
@@ -204,6 +324,12 @@ app.MapHealthChecks("/health/ready", new HealthCheckOptions
 {
     Predicate = registration => registration.Tags.Contains("ready")
 }).ExcludeFromDescription();
+app.MapGet("/health/version", () => Results.Ok(new
+{
+    service = "notification-api",
+    color = releaseColor,
+    sha = releaseSha
+})).ExcludeFromDescription();
 app.MapGet("/", () => Results.Redirect("/swagger")).ExcludeFromDescription();
 
 app.Run();
