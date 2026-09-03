@@ -19,7 +19,7 @@
 - API v1 and v2 publish separate OpenAPI documents with concrete versioned paths; legacy unversioned routes remain documented in v2 only.
 - All versioned and compatibility business-API error paths return RFC 7807 Problem Details, and deprecated v1 responses include `Deprecation` and `Sunset` headers. Operational `/health/*` endpoints intentionally use the health-check status contract instead of the business API error contract.
 - Database seed data includes products, cart items, orders, order items, and notification records for visitor@example.test and admin@example.test.
-- The Development and Week 3 training profiles can apply EF Core migrations on API startup. Production-style profiles disable that behavior and use the one-shot `NSA.Migrator` host.
+- The Development and Week 3 training profiles can apply EF Core migrations on API startup. Production-style profiles disable that behavior and invoke the API's one-shot `--migrate` mode.
 - OpenAPI 3.0 is exposed through Swashbuckle at /swagger with XML endpoint comments.
 
 ## Week 3 messaging and deployment acceptance

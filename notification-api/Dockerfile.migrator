@@ -2,14 +2,10 @@ FROM mcr.microsoft.com/dotnet/sdk:8.0@sha256:306301580fcaa5b445180e759db59309979
 WORKDIR /src
 
 COPY notification-api/NSA.csproj notification-api/
-COPY notification.core/NSA.Core.csproj notification.core/
-COPY notification.migrator/NSA.Migrator.csproj notification.migrator/
-RUN dotnet restore "notification.migrator/NSA.Migrator.csproj"
+RUN dotnet restore "notification-api/NSA.csproj"
 
 COPY notification-api/ notification-api/
-COPY notification.core/ notification.core/
-COPY notification.migrator/ notification.migrator/
-RUN dotnet publish "notification.migrator/NSA.Migrator.csproj" \
+RUN dotnet publish "notification-api/NSA.csproj" \
     --configuration Release \
     --no-restore \
     --output /app/publish \
@@ -19,4 +15,4 @@ FROM mcr.microsoft.com/dotnet/aspnet:8.0@sha256:b0beb9cc1dee1c1b0749796110d47342
 WORKDIR /app
 COPY --from=build /app/publish .
 USER app
-ENTRYPOINT ["dotnet", "NSA.Migrator.dll"]
+ENTRYPOINT ["dotnet", "NSA.dll", "--migrate"]

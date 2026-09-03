@@ -1,7 +1,7 @@
 using NSA.Dlq.Worker.Handlers;
 using NSA.Infrastructure.Messaging;
-using NSA.Workers.Shared.Hosting;
-using NSA.Workers.Shared.Messaging;
+using NSA.Dlq.Worker.Hosting;
+using NSA.Dlq.Worker.Messaging;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 
@@ -25,7 +25,7 @@ public sealed class RabbitMqDeadLetterRecoveryWorker(
 
     // Keep recovery ordered and deliberately conservative: a replay is not
     // acknowledged from the DLQ until its recovery publication is confirmed.
-    protected override ushort PrefetchCount => 1;
+    protected override ushort PrefetchCount => 1;// Only one message at a time to ensure ordered processing.
 
     protected override Task HandleDeliveryAsync(
         IChannel channel,

@@ -2,11 +2,9 @@ FROM mcr.microsoft.com/dotnet/sdk:8.0@sha256:306301580fcaa5b445180e759db59309979
 WORKDIR /src
 
 COPY notification-api/NSA.csproj notification-api/
-COPY notification.core/NSA.Core.csproj notification.core/
 RUN dotnet restore "notification-api/NSA.csproj"
 
 COPY notification-api/ notification-api/
-COPY notification.core/ notification.core/
 RUN dotnet publish "notification-api/NSA.csproj" \
     --configuration Release \
     --no-restore \

@@ -1,7 +1,7 @@
 using NSA.Infrastructure.Messaging;
 using NSA.Worker.Handlers;
-using NSA.Workers.Shared.Hosting;
-using NSA.Workers.Shared.Messaging;
+using NSA.Worker.Hosting;
+using NSA.Worker.Messaging;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 

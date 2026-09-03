@@ -2,7 +2,7 @@ using Microsoft.Extensions.Configuration;
 using NSA.Application.Contracts;
 using NSA.Infrastructure.Messaging;
 using NSA.Service;
-using NSA.Workers.Shared.Messaging;
+using NSA.Worker.Messaging;
 using RabbitMQ.Client;
 
 namespace NSA.Worker.Handlers;

@@ -1,7 +1,10 @@
+extern alias primary;
+
 using System.Text.Json;
-using NSA.Application.Contracts;
-using NSA.Workers.Shared.Messaging;
 using RabbitMQ.Client;
+using BulkNotificationCommandInvalidReason = primary::NSA.Worker.Messaging.BulkNotificationCommandInvalidReason;
+using BulkNotificationCommandReader = primary::NSA.Worker.Messaging.BulkNotificationCommandReader;
+using BulkNotificationRequestedV1 = primary::NSA.Application.Contracts.BulkNotificationRequestedV1;
 
 namespace NSA.Tests;
 

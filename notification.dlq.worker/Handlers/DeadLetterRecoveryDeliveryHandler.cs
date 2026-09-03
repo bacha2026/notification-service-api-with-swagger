@@ -2,7 +2,6 @@ using Microsoft.Extensions.Configuration;
 using NSA.Dlq.Worker.Messaging;
 using NSA.Infrastructure.Messaging;
 using NSA.Service;
-using NSA.Workers.Shared.Messaging;
 
 namespace NSA.Dlq.Worker.Handlers;
 
@@ -19,6 +18,7 @@ public sealed class DeadLetterRecoveryDeliveryHandler(
     public async Task HandleAsync(IRabbitMqDelivery delivery, CancellationToken cancellationToken)
     {
         var body = delivery.Body;
+
         if (!DeadLetterRecoveryMessageInspector.WasRejectedFromCommandQueue(
                 delivery.Properties,
                 RabbitMqConfiguration.GetRequiredString(configuration, "CommandQueue")))
@@ -48,7 +48,7 @@ public sealed class DeadLetterRecoveryDeliveryHandler(
         var replayCount = DeadLetterRecoveryMessageInspector.ReadHeaderCount(
             delivery.Properties.Headers,
             DeadLetterRecoveryMessageInspector.ReplayCountHeader);
-        var maxReplayAttempts = RabbitMqConfiguration.GetInt32(
+        var maxReplayAttempts = RabbitMqConfiguration.GetInt32(//MaxDeadLetterReplayAttempts is configured in settings
             configuration,
             "MaxDeadLetterReplayAttempts",
             1,
@@ -64,6 +64,8 @@ public sealed class DeadLetterRecoveryDeliveryHandler(
         }
 
         await using var scope = scopeFactory.CreateAsyncScope();
+        /* if the job is already Completed or CompletedWithErrors:no recovery needed,if the job is DeadLettered:
+        mark it RecoveryPending reset queue timestamps, save the job */
         var recovery = scope.ServiceProvider.GetRequiredService<BulkNotificationDeadLetterRecoveryService>();
         var recoveryResult = await recovery.PrepareForReplayAsync(command.JobId, cancellationToken);
 

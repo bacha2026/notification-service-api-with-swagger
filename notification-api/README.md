@@ -6,13 +6,14 @@ Week 4 makes notification admission durable across broker outages. The API commi
 
 ## Architecture at a glance
 
-There are four deployable processes and one shared worker library:
+There are four independent deployable processes:
 
 - The API is built from [NSA.csproj](NSA.csproj). It owns HTTP contracts, local account authentication, idempotent job admission, SQL persistence, and status queries. It does not connect to RabbitMQ.
 - The Outbox Relay is built from [NSA.Outbox.Worker.csproj](../notification.outbox.worker/NSA.Outbox.Worker.csproj). It leases pending SQL outbox rows, publishes their stable payloads with confirms, and schedules bounded retries.
 - The Worker Service is built from [NSA.Worker.csproj](../notification.worker/NSA.Worker.csproj). It owns RabbitMQ consumption, command retries, dead-letter routing, and notification processing.
 - The DLQ Recovery Worker is built from [NSA.Dlq.Worker.csproj](../notification.dlq.worker/NSA.Dlq.Worker.csproj). It replays valid commands rejected by the main worker after resetting their persisted job state.
-- [NSA.Worker.Shared.csproj](../notification.worker.shared/NSA.Worker.Shared.csproj) is not deployable. It centralizes the RabbitMQ connection lifecycle, topology/readiness checks, safe fallback requeueing, AMQP header/property handling, and command-envelope validation. Each executable retains only its own delivery policy.
+
+Each executable compiles only source within its own project directory. The three workers own their appsettings, persistence model, RabbitMQ configuration/topology, and processing code; there are no project references between the API or worker executables. The primary and DLQ workers each own their consumer lifecycle, readiness checks, AMQP header/property handling, and command-envelope validation.
 
 The existing folders remain shared code boundaries:
 
@@ -73,7 +74,7 @@ The checked-in [global.json](../global.json) selects the latest installed .NET 8
 
 .NET maps a double underscore in environment-variable names to a configuration colon. For example, `RabbitMq__HostName` overrides `RabbitMq:HostName`.
 
-The API uses its root `appsettings.json`. The identical non-secret messaging defaults are copied to [notification.worker.shared/appsettings.json](../notification.worker.shared/appsettings.json) and linked into all three worker publish outputs as their root `appsettings.json`. Keep the two files synchronized; environment variables remain the higher-precedence place for deployment-specific values and credentials.
+The API and each worker use the `appsettings.json` stored in their own project directory. Environment variables remain the higher-precedence place for deployment-specific values and credentials.
 
 | Key | Purpose | Checked-in behavior |
 | --- | --- | --- |
@@ -304,12 +305,11 @@ Explicit remaining gaps:
 - The demo provider's local idempotency header is not a verified provider deduplication guarantee.
 - Automatic replay is intentionally limited to commands explicitly rejected from the main queue. Broker delivery-limit, malformed, unsupported, unknown-job, and replay-limit-exhausted messages remain in the parking queue for operator investigation. Full reconciliation remains future work.
 
-The Week 5 architecture now places reusable application, domain, persistence,
-infrastructure, and service code in `notification.core/NSA.Core.csproj`. The API
-is only the executable HTTP host; worker hosts reference Core directly. A
-dedicated `notification.migrator` owns schema changes, while production API and
-worker startup explicitly disables automatic migration. Week 6 consumes
-digest-pinned API/Next/migrator artifacts and never rebuilds on the target host.
+The API and all three workers are independent build units with no shared project
+references. The API owns EF Core migrations and exposes a one-shot `--migrate`
+mode used by the existing migrator container; normal production API and worker
+startup explicitly disables automatic migration. Week 6 consumes digest-pinned
+API/Next/migration artifacts and never rebuilds on the target host.
 
 The ignored `.env` credentials are coupled to the existing named SQL/RabbitMQ volumes. If `.env` is removed or rotated while those volumes remain, newly configured values will not automatically change credentials stored inside the services. Do not delete volumes implicitly; Week 5 provisioning must reconcile both sides or require an explicitly approved recoverable reset.
 

@@ -1,5 +1,4 @@
 using NSA.Application.Contracts;
-using NSA.Workers.Shared.Messaging;
 using RabbitMQ.Client;
 
 namespace NSA.Dlq.Worker.Messaging;

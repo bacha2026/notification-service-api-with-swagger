@@ -4,10 +4,10 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
-using NSA.Application.Abstractions;
-using NSA.Domain.Entities;
-using NSA.Infrastructure.Configuration;
-using NSA.Persistence;
+using IOutboxMessagePublisher = outbox::NSA.Application.Abstractions.IOutboxMessagePublisher;
+using OutboxMessage = outbox::NSA.Domain.Entities.OutboxMessage;
+using OutboxOptions = outbox::NSA.Infrastructure.Configuration.OutboxOptions;
+using NotificationDbContext = outbox::NSA.Persistence.NotificationDbContext;
 using OutboxRelayService = outbox::NSA.Outbox.Worker.OutboxRelayService;
 using OutboxRelayWorker = outbox::NSA.Outbox.Worker.OutboxRelayWorker;
 
@@ -212,7 +212,7 @@ public sealed class OutboxRelayServiceTests
         new()
         {
             Id = Guid.NewGuid(),
-            AggregateType = nameof(BulkNotificationJob),
+            AggregateType = "BulkNotificationJob",
             AggregateId = Guid.NewGuid().ToString("D"),
             MessageType = "test.message.v1",
             SchemaVersion = 1,

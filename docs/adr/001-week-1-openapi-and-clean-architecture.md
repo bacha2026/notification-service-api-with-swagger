@@ -28,10 +28,10 @@ Use a modular Clean Architecture with these responsibilities:
   shaping.
 - Each executable `Program.cs` remains a thin composition root.
 
-`notification.core/NSA.Core.csproj` is the reusable compile-time boundary for
-non-Presentation code. The API references Core and owns Presentation. The
-Outbox Relay, primary Worker, DLQ Recovery Worker, and migrator reference Core,
-not the Web executable.
+Each deployable project owns and compiles its application, domain, persistence,
+infrastructure, and service code locally. The API additionally owns Presentation
+and EF migrations. No deployable executable references another executable or a
+shared implementation project.
 
 Expose OpenAPI 3.0 and Swagger UI at `/swagger`. Generate XML documentation for
 API and Core types, document every endpoint and response code, and keep the
@@ -44,8 +44,8 @@ as the visual companion to this decision.
   workers to Presentation and Web runtime assets.
 - **One assembly per layer immediately:** strongest compile-time isolation, but
   adds packaging overhead before separate ownership justifies it.
-- **Reusable Core plus thin hosts:** selected as the practical boundary; layer
-  assemblies remain a future option if the system or teams grow.
+- **Reusable Core plus thin hosts:** previously selected, then replaced when
+  independent deployment and source ownership became the stronger requirement.
 
 ## Consequences
 
@@ -61,6 +61,6 @@ as the visual companion to this decision.
 
 - `dotnet build notification-api/NSA.sln --configuration Release`
 - Open `http://127.0.0.1:8080/swagger` and inspect the documented endpoints.
-- Confirm worker project files reference `notification.core/NSA.Core.csproj`.
+- Confirm the API and worker project files contain no `ProjectReference` items.
 - Validate `drawio/notification.drawio` as XML and use it in the architecture
   walkthrough.

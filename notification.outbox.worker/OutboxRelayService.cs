@@ -78,7 +78,7 @@ public sealed class OutboxRelayService(
                 affected = message is null ? 0 : 1;
                 if (message is not null)
                 {
-                    message.LockedBy = workerId;
+                    message.LockedBy = workerId;// prevents multiple workers from claiming the same message
                     message.LockedUntilUtc = lockedUntil;
                     await dbContext.SaveChangesAsync(cancellationToken);
                     dbContext.Entry(message).State = EntityState.Detached;

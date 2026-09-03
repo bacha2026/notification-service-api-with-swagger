@@ -1,12 +1,7 @@
 # ADR: Week 3 — RabbitMQ Queue, Separate Workers, and Safe Failure Handling
 
-**Status:** Accepted as the historical Week 3 checkpoint; publication details superseded by ADR 004  
+**Status:** 
 **Scope:** Week 3
-
-> This record preserves the Week 3 two-project decision as it was presented.
-> The cumulative implementation now commits jobs and commands atomically to
-> SQL, then publishes them through `NSA.Outbox.Worker`; see
-> `docs/adr/004-week-4-idempotency-outbox-inbox-and-delivery-pipeline.md`.
 
 ## Context
 
@@ -19,7 +14,7 @@ This made the system fragile. The API was responsible for both receiving the req
 At the Week 3 checkpoint, move the actual work out of the API and into a more reliable queue-based system.
 
 - The API saves each job and its items in SQL Server first.
-- The Week 3 implementation then sent a small, versioned message to RabbitMQ. Week 4 replaced this dual write with a transactional Outbox and a separate relay.
+- The Week 3 implementation then sent a small, versioned message to RabbitMQ. 
 - RabbitMQ acts like a durable mailbox between the API and the worker.
 - A separate `notification.worker` reads the queue and processes the work.
 - The worker only marks the job as complete after it has saved its progress in SQL.

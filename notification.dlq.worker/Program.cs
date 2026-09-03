@@ -4,7 +4,7 @@ using NSA.Dlq.Worker.Handlers;
 using NSA.Persistence;
 using NSA.Persistence.Concrete;
 using NSA.Service;
-using NSA.Workers.Shared.Hosting;
+using NSA.Dlq.Worker.Hosting;
 
 var builder = Host.CreateApplicationBuilder(args);
 builder.Configuration.AddKeyPerFile("/run/secrets", optional: true);

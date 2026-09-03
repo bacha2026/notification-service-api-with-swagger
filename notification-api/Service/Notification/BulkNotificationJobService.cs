@@ -50,6 +50,7 @@ public sealed class BulkNotificationJobService(
             item.Subject.Trim(),
             item.Body.Trim(),
             item.OrderId)).ToArray();
+
         var requestHash = IdempotencyRequestHasher.Hash(normalizedItems.Select(item => new
         {
             RecipientEmail = item.RecipientEmail.ToUpperInvariant(),
@@ -62,10 +63,12 @@ public sealed class BulkNotificationJobService(
         await using var transaction = await idempotencyStore.BeginSerializableTransactionAsync(cancellationToken);
         await idempotencyStore.PurgeExpiredAsync(idempotency, cancellationToken);
         await idempotencyStore.AcquireLockAsync(idempotency, cancellationToken);
+
         var replay = await idempotencyStore.TryReplayAsync<BulkNotificationJobDto>(
             idempotency,
             requestHash,
             cancellationToken);
+
         if (replay is not null)
         {
             await CommitAsync(transaction, cancellationToken);
@@ -73,7 +76,9 @@ public sealed class BulkNotificationJobService(
         }
 
         await RemoveExpiredJobsAsync(cancellationToken);
+
         var activeJobCount = await jobs.CountActiveAsync(cancellationToken);
+
         if (activeJobCount >= settings.MaxTrackedJobs)
         {
             throw new BulkNotificationCapacityException(
@@ -83,9 +88,11 @@ public sealed class BulkNotificationJobService(
         var now = timeProvider.GetUtcNow();
         var jobId = Guid.NewGuid();
         var messageId = Guid.NewGuid();
+
         var normalizedCorrelationId = string.IsNullOrWhiteSpace(correlationId)
             ? jobId.ToString("N")
             : correlationId.Trim()[..Math.Min(correlationId.Trim().Length, 128)];
+
         var job = new BulkNotificationJob
         {
             Id = jobId,
@@ -107,12 +114,14 @@ public sealed class BulkNotificationJobService(
         };
 
         jobs.Add(job);
+
         var command = new BulkNotificationRequestedV1(
             BulkNotificationRequestedV1.CurrentSchemaVersion,
             messageId,
             job.Id,
             job.CorrelationId,
             now);
+
         dbContext.OutboxMessages.Add(new OutboxMessage
         {
             Id = messageId,

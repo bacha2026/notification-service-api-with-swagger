@@ -1,15 +1,9 @@
 FROM mcr.microsoft.com/dotnet/sdk:8.0@sha256:306301580fcaa5b445180e759db59309979002d1000669cb4cf58a567d0014bc AS build
 WORKDIR /src
 
-COPY notification-api/NSA.csproj notification-api/
-COPY notification.core/NSA.Core.csproj notification.core/
-COPY notification.worker.shared/NSA.Worker.Shared.csproj notification.worker.shared/
 COPY notification.outbox.worker/NSA.Outbox.Worker.csproj notification.outbox.worker/
 RUN dotnet restore "notification.outbox.worker/NSA.Outbox.Worker.csproj"
 
-COPY notification-api/ notification-api/
-COPY notification.core/ notification.core/
-COPY notification.worker.shared/ notification.worker.shared/
 COPY notification.outbox.worker/ notification.outbox.worker/
 RUN dotnet publish "notification.outbox.worker/NSA.Outbox.Worker.csproj" \
     --configuration Release \

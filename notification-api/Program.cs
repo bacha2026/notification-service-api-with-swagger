@@ -27,8 +27,36 @@ using NSA.Presentation.ExceptionHandling;
 using NSA.Presentation.OpenApi;
 using NSA.Service;
 
-var builder = WebApplication.CreateBuilder(args);
+var migrateOnly = args.Any(argument => string.Equals(argument, "--migrate", StringComparison.OrdinalIgnoreCase));
+var hostArguments = args.Where(argument => !string.Equals(argument, "--migrate", StringComparison.OrdinalIgnoreCase)).ToArray();
+var builder = WebApplication.CreateBuilder(hostArguments);
 builder.Configuration.AddKeyPerFile("/run/secrets", optional: true);
+
+if (migrateOnly)
+{
+    var connectionString = builder.Configuration.GetConnectionString("NotificationDb");
+    if (string.IsNullOrWhiteSpace(connectionString))
+    {
+        throw new InvalidOperationException(
+            "ConnectionStrings:NotificationDb is required for one-shot database migration.");
+    }
+
+    var migrationOptions = new DbContextOptionsBuilder<NotificationDbContext>()
+        .UseSqlServer(connectionString)
+        .Options;
+    await using var migrationContext = new NotificationDbContext(migrationOptions);
+    var pendingMigrations = (await migrationContext.Database.GetPendingMigrationsAsync()).ToArray();
+    if (pendingMigrations.Length == 0)
+    {
+        Console.WriteLine("Database schema is current; no migrations were applied.");
+        return;
+    }
+
+    Console.WriteLine($"Applying {pendingMigrations.Length} additive migration(s).");
+    await migrationContext.Database.MigrateAsync();
+    Console.WriteLine("Database migrations completed successfully.");
+    return;
+}
 const string FrontendCorsPolicy = "frontend";
 const string AuthenticationRateLimitPolicy = "authentication";
 var releaseColor = builder.Configuration["Release:Color"] ?? "local";
@@ -156,7 +184,7 @@ builder.Services.AddSwaggerGen(options =>
         Description = "Current version of the order tracking and notification API."
     });
 
-    foreach (var xmlFile in new[] { "NSA.xml", "NSA.Core.xml" })
+    foreach (var xmlFile in new[] { "NSA.xml" })
     {
         var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
         if (File.Exists(xmlPath))
