@@ -1,6 +1,6 @@
 using RabbitMQ.Client;
 
-namespace NSA.Worker.Messaging;
+namespace NSA.Worker;
 
 /// <summary>Creates persistent copies of RabbitMQ properties while preserving message identity.</summary>
 public static class RabbitMqMessageProperties

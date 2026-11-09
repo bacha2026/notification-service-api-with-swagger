@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using NSA.Application.Abstractions;
 using NSA.Domain.Entities;
+using NSA.Domain.Enums;
 
 namespace NSA.Persistence.Concrete;
 
@@ -37,15 +38,17 @@ public sealed class NotificationRepository(NotificationDbContext dbContext) : IN
 
         return await dbContext.Notifications
             .Where(notification => notification.RecipientEmail == normalizedRecipientEmail
-                && notification.BulkNotificationJobId.HasValue
-                && notification.BulkNotificationJobItemId.HasValue
-                && dbContext.BulkNotificationJobs.Any(job =>
-                    job.Id == notification.BulkNotificationJobId
-                    && job.Status == BulkNotificationJobStatuses.Completed)
-                && dbContext.BulkNotificationJobItems.Any(item =>
-                    item.Id == notification.BulkNotificationJobItemId
-                    && item.JobId == notification.BulkNotificationJobId
-                    && item.Status == BulkNotificationItemStatuses.Succeeded))
+                && notification.Channel == NotificationChannel.InApp
+                && ((!notification.BulkNotificationJobId.HasValue && !notification.BulkNotificationJobItemId.HasValue)
+                    || notification.BulkNotificationJobId.HasValue
+                        && notification.BulkNotificationJobItemId.HasValue
+                        && dbContext.BulkNotificationJobs.Any(job =>
+                            job.Id == notification.BulkNotificationJobId
+                            && job.Status == BulkNotificationJobStatuses.Completed)
+                        && dbContext.BulkNotificationJobItems.Any(item =>
+                            item.Id == notification.BulkNotificationJobItemId
+                            && item.JobId == notification.BulkNotificationJobId
+                            && item.Status == BulkNotificationItemStatuses.Succeeded)))
             .OrderByDescending(notification => notification.CreatedAtUtc)
             .ToListAsync(cancellationToken);
     }
@@ -58,15 +61,17 @@ public sealed class NotificationRepository(NotificationDbContext dbContext) : IN
         return dbContext.Notifications.SingleOrDefaultAsync(notification =>
             notification.Id == id
             && notification.RecipientEmail == recipientEmail
-            && notification.BulkNotificationJobId.HasValue
-            && notification.BulkNotificationJobItemId.HasValue
-            && dbContext.BulkNotificationJobs.Any(job =>
-                job.Id == notification.BulkNotificationJobId
-                && job.Status == BulkNotificationJobStatuses.Completed)
-            && dbContext.BulkNotificationJobItems.Any(item =>
-                item.Id == notification.BulkNotificationJobItemId
-                && item.JobId == notification.BulkNotificationJobId
-                && item.Status == BulkNotificationItemStatuses.Succeeded),
+            && notification.Channel == NotificationChannel.InApp
+            && ((!notification.BulkNotificationJobId.HasValue && !notification.BulkNotificationJobItemId.HasValue)
+                || notification.BulkNotificationJobId.HasValue
+                    && notification.BulkNotificationJobItemId.HasValue
+                    && dbContext.BulkNotificationJobs.Any(job =>
+                        job.Id == notification.BulkNotificationJobId
+                        && job.Status == BulkNotificationJobStatuses.Completed)
+                    && dbContext.BulkNotificationJobItems.Any(item =>
+                        item.Id == notification.BulkNotificationJobItemId
+                        && item.JobId == notification.BulkNotificationJobId
+                        && item.Status == BulkNotificationItemStatuses.Succeeded)),
             cancellationToken);
     }
 

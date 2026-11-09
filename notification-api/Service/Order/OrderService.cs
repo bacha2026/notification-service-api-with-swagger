@@ -10,6 +10,7 @@ namespace NSA.Service;
 
 public sealed class OrderService(
     IOrderRepository orderRepository,
+    IUserRepository userRepository,
     INotificationService notificationService,
     IBulkNotificationJobService bulkNotificationJobs,
     NotificationDbContext dbContext,
@@ -45,6 +46,20 @@ public sealed class OrderService(
         EnsureAuthenticatedUserId(userId);
         var order = await orderRepository.GetByIdForUserWithItemsAsync(id, userId, cancellationToken);
         return order is null ? null : ToDto(order);
+    }
+
+    public async Task<bool> DeleteOrderForUserAsync(int id, Guid userId, CancellationToken cancellationToken)
+    {
+        EnsureAuthenticatedUserId(userId);
+        var order = await orderRepository.GetByIdForUserWithItemsAsync(id, userId, cancellationToken);
+        if (order is null)
+        {
+            return false;
+        }
+
+        orderRepository.Remove(order);
+        await orderRepository.SaveChangesAsync(cancellationToken);
+        return true;
     }
 
     public Task<CreateOrderResult> CreateOrderAsync(CreateOrderRequest request, CancellationToken cancellationToken)
@@ -115,8 +130,9 @@ public sealed class OrderService(
         orderRepository.RemoveCartItems(cartItems);
         await orderRepository.SaveChangesAsync(cancellationToken);
 
+        var adminEmails = await userRepository.GetAdminEmailsAsync(cancellationToken);
         var job = await bulkNotificationJobs.QueueAsync(
-            CreateOrderPlacedNotificationRequest(order),
+            CreateOrderPlacedNotificationRequest(order, adminEmails),
             correlationIdProvider.CurrentCorrelationId ?? $"order-{order.Id}",
             cancellationToken);
         var result = new CreateOrderResult(
@@ -155,7 +171,7 @@ public sealed class OrderService(
             timeProvider.GetUtcNow());
 
         var body = BuildOrderMessage(order);
-        await CreateNotificationAsync(AdminEmail, $"Order #{order.Id} status updated", body, order.Id, cancellationToken);
+        await CreateAdminNotificationsAsync($"Order #{order.Id} status updated", body, order.Id, cancellationToken);
         await CreateNotificationAsync(order.VisitorEmail, $"Order #{order.Id} status updated", body, order.Id, cancellationToken);
         await orderRepository.SaveChangesAsync(cancellationToken);
 
@@ -182,8 +198,7 @@ public sealed class OrderService(
 
         var body = $"Order #{order.Id} for {order.VisitorEmail} was cancelled by the visitor. "
             + BuildOrderMessage(order);
-        await CreateNotificationAsync(
-            AdminEmail,
+        await CreateAdminNotificationsAsync(
             $"Order #{order.Id} cancelled by visitor",
             body,
             order.Id,
@@ -193,26 +208,36 @@ public sealed class OrderService(
         return ToDto(order);
     }
 
-    private string AdminEmail => recipientSettings.AdminEmail;
-
-    private CreateBulkNotificationsRequest CreateOrderPlacedNotificationRequest(Order order)
+    private CreateBulkNotificationsRequest CreateOrderPlacedNotificationRequest(Order order, IReadOnlyList<string> adminEmails)
     {
         var body = BuildOrderMessage(order);
-        return new CreateBulkNotificationsRequest(
-        [
-            new BulkNotificationItemRequest(
-                AdminEmail,
+        var notifications = adminEmails
+            .Select(email => new BulkNotificationItemRequest(
+                email,
                 NotificationChannel.InApp,
                 $"New order #{order.Id}",
                 body,
-                order.Id),
-            new BulkNotificationItemRequest(
+                order.Id))
+            .Append(new BulkNotificationItemRequest(
                 order.VisitorEmail,
                 NotificationChannel.InApp,
                 $"Order #{order.Id} received",
                 body,
-                order.Id)
-        ]);
+                order.Id));
+        return new CreateBulkNotificationsRequest(
+            notifications.ToArray());
+    }
+
+    private async Task CreateAdminNotificationsAsync(
+        string subject,
+        string body,
+        int orderId,
+        CancellationToken cancellationToken)
+    {
+        foreach (var adminEmail in await userRepository.GetAdminEmailsAsync(cancellationToken))
+        {
+            await CreateNotificationAsync(adminEmail, subject, body, orderId, cancellationToken);
+        }
     }
 
     private Task<NotificationDto> CreateNotificationAsync(

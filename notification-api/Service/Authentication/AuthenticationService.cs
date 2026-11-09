@@ -3,6 +3,12 @@ using NSA.Application.Configuration;
 using NSA.Application.Contracts;
 using NSA.Application.Exceptions;
 using NSA.Domain.Entities;
+using System.Net;
+using System.Net.Mail;
+using System.Security.Cryptography;
+using System.Text;
+using Microsoft.Extensions.Configuration;
+using Microsoft.AspNetCore.WebUtilities;
 
 namespace NSA.Service;
 
@@ -12,8 +18,56 @@ public sealed class AuthenticationService(
     IPasswordHasher passwordHasher,
     IAccessTokenIssuer accessTokenIssuer,
     AuthenticationSettings settings,
-    TimeProvider timeProvider) : IAuthenticationService
+    TimeProvider timeProvider,
+    IConfiguration configuration) : IAuthenticationService
 {
+    public async Task RequestPasswordResetAsync(string email, CancellationToken cancellationToken)
+    {
+        var user = await userRepository.GetByNormalizedEmailAsync(UserCredential.NormalizeEmail(email), cancellationToken);
+        if (user?.Credential is not { } credential) return;
+
+        var token = WebEncoders.Base64UrlEncode(RandomNumberGenerator.GetBytes(32));
+        var tokenHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token)));
+        credential.SetPasswordResetToken(tokenHash, timeProvider.GetUtcNow().AddMinutes(30));
+        await userRepository.SaveChangesAsync(cancellationToken);
+
+        var smtp = configuration.GetSection("PasswordReset:Smtp");
+        var host = smtp["Host"];
+        var sender = smtp["From"];
+        var resetBaseUrl = configuration["PasswordReset:FrontendUrl"];
+        if (string.IsNullOrWhiteSpace(host) || string.IsNullOrWhiteSpace(sender) || string.IsNullOrWhiteSpace(resetBaseUrl))
+            throw new InvalidOperationException("Password reset email settings are not configured.");
+
+        var resetUrl = $"{resetBaseUrl.TrimEnd('/')}/reset-password?token={Uri.EscapeDataString(token)}";
+        using var message = new MailMessage(sender, credential.Email)
+        {
+            Subject = "Reset your password",
+            Body = $"Use this link within 30 minutes to reset your password: {resetUrl}",
+            IsBodyHtml = false
+        };
+        using var client = new SmtpClient(host, smtp.GetValue("Port", 587))
+        {
+            EnableSsl = smtp.GetValue("EnableSsl", true),
+            Credentials = string.IsNullOrWhiteSpace(smtp["UserName"])
+                ? CredentialCache.DefaultNetworkCredentials
+                : new NetworkCredential(smtp["UserName"], smtp["Password"])
+        };
+        await client.SendMailAsync(message, cancellationToken);
+    }
+
+    public async Task ResetPasswordAsync(string token, string newPassword, CancellationToken cancellationToken)
+    {
+        ValidatePasswordPolicy(newPassword);
+        var tokenHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token)));
+        var credential = await userRepository.GetByPasswordResetTokenHashAsync(tokenHash, cancellationToken);
+        var now = timeProvider.GetUtcNow();
+        if (credential is null || !credential.HasValidPasswordResetToken(tokenHash, now))
+            throw new RequestValidationException("This password reset link is invalid or has expired. Request a new link.");
+        credential.ReplacePasswordHash(passwordHasher.Hash(newPassword), now);
+        credential.RecordSuccessfulLogin(now);
+        await userRepository.SaveChangesAsync(cancellationToken);
+    }
+
     public async Task<AuthenticationResponse> SignUpAsync(SignUpRequest request, CancellationToken cancellationToken)
     {
         var now = timeProvider.GetUtcNow();
@@ -107,7 +161,7 @@ public sealed class AuthenticationService(
     }
 
     private static AuthenticatedUserDto ToDto(User user, UserCredential credential) =>
-        new(user.Id, user.FirstName, user.LastName, credential.Email, user.PhotoUrl, user.HasEnabledMfaMethod());
+        new(user.Id, user.FirstName, user.LastName, credential.Email, user.PhotoUrl, user.HasEnabledMfaMethod(), user.IsAdmin);
 
     private static void ValidatePasswordPolicy(string password)
     {

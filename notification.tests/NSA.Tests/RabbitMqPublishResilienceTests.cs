@@ -1,6 +1,10 @@
+extern alias outbox;
+
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
-using NSA.Infrastructure.Messaging;
+using RabbitMqConfiguration = outbox::NSA.Outbox.Worker.RabbitMqConfiguration;
+using RabbitMqPublishResiliencePolicyProvider = outbox::NSA.Outbox.Worker.RabbitMqPublishResiliencePolicyProvider;
+using RabbitMqOutboxMessagePublisher = outbox::NSA.Outbox.Worker.RabbitMqOutboxMessagePublisher;
 using RabbitMQ.Client.Exceptions;
 using Polly.CircuitBreaker;
 

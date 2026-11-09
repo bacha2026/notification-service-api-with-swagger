@@ -1,4 +1,6 @@
 using Asp.Versioning;
+using System.ComponentModel.DataAnnotations;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using NSA.Application.Abstractions;
 using NSA.Application.Contracts;
@@ -10,6 +12,7 @@ namespace NSA.Presentation.Controllers;
 [ApiVersion("2.0")]
 [Route("api/v{version:apiVersion}/notifications")]
 [Route("api/notifications")]
+[Authorize(Roles = "Admin")]
 public sealed class NotificationsController(INotificationService notificationService) : ControllerBase
 {
     /// <summary>Gets notifications, optionally filtered by recipient email or order id.</summary>
@@ -21,6 +24,47 @@ public sealed class NotificationsController(INotificationService notificationSer
     {
         var notifications = await notificationService.GetNotificationsAsync(recipientEmail, orderId, cancellationToken);
         return Ok(notifications);
+    }
+
+    /// <summary>Gets completed in-app notifications for a visitor email.</summary>
+    [AllowAnonymous]
+    [HttpGet("visitor")]
+    [ProducesResponseType(typeof(IEnumerable<NotificationDto>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<IEnumerable<NotificationDto>>> GetVisitorNotifications(
+        [FromQuery, EmailAddress, StringLength(320)] string visitorEmail,
+        CancellationToken cancellationToken)
+    {
+        return Ok(await notificationService.GetCompletedNotificationsForRecipientAsync(visitorEmail, cancellationToken));
+    }
+
+    /// <summary>Marks a visitor's in-app notification as read.</summary>
+    [AllowAnonymous]
+    [HttpPatch("visitor/{id:int}/read")]
+    [ProducesResponseType(typeof(NotificationDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<NotificationDto>> MarkVisitorNotificationAsRead(
+        int id,
+        [FromQuery, EmailAddress, StringLength(320)] string visitorEmail,
+        CancellationToken cancellationToken)
+    {
+        var notification = await notificationService.MarkCompletedNotificationAsReadForRecipientAsync(
+            id, visitorEmail, cancellationToken);
+        return notification is null ? NotFound() : Ok(notification);
+    }
+
+    /// <summary>Deletes a visitor's in-app notification.</summary>
+    [AllowAnonymous]
+    [HttpDelete("visitor/{id:int}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DeleteVisitorNotification(
+        int id,
+        [FromQuery, EmailAddress, StringLength(320)] string visitorEmail,
+        CancellationToken cancellationToken)
+    {
+        var deleted = await notificationService.DeleteCompletedNotificationForRecipientAsync(
+            id, visitorEmail, cancellationToken);
+        return deleted ? NoContent() : NotFound();
     }
 
     /// <summary>Gets one notification by id.</summary>
@@ -116,24 +160,29 @@ public sealed class NotificationsController(INotificationService notificationSer
         [FromHeader(Name = IdempotencyContext.HeaderName)] string? idempotencyKey,
         CancellationToken cancellationToken)
     {
-        var correlationId = HttpContext.TraceIdentifier;
-        var requestedVersion = HttpContext.GetRequestedApiVersion();
-        var idempotency = IdempotencyContext.Create(
-            $"notifications.bulk.create.v{requestedVersion?.MajorVersion ?? 2}",
-            "global",
-            idempotencyKey);
+        var correlationId = HttpContext.TraceIdentifier;// current HTTP request trace ID, orrelating logs and diagnostics across the entire request
+        var requestedVersion = HttpContext.GetRequestedApiVersion();//the system can decide whether to build versioned resource URLs and whether the operation belongs to a versioned API contract
+
+        var idempotency = IdempotencyContext.Create( //Creates an idempotency context for the request, which is used to ensure that repeated requests with the same idempotency key are handled correctly.
+            $"notifications.bulk.create.v{requestedVersion?.MajorVersion ?? 2}",//operation name and version
+            "global",//scope
+            idempotencyKey);//key
+
         var result = await bulkJobs.QueueAsync(
             request,
             correlationId,
             idempotency,
             cancellationToken);
+
         var job = result.Value;
+
         if (result.Replayed)
         {
-            Response.Headers[IdempotencyContext.ReplayHeaderName] = "true";
+            Response.Headers[IdempotencyContext.ReplayHeaderName] = "true";//Indicates that the response is a replay of a previous request with the same idempotency key, rather than a new request.
         }
 
-        Response.Headers["X-Correlation-ID"] = job.CorrelationId;
+        Response.Headers["X-Correlation-ID"] = job.CorrelationId;//so the caller can match the response back to the original request
+
         var statusLocation = requestedVersion is null
             ? $"/api/notifications/bulk/{job.JobId}"
             : $"/api/v{requestedVersion.MajorVersion}/notifications/bulk/{job.JobId}";

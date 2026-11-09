@@ -1,4 +1,5 @@
 import type { AuthSession, AuthenticatedUser } from "@/app/lib/auth-store";
+import type { Order } from "@/app/lib/store-types";
 
 const API_PREFIX = "/api/notification";
 
@@ -98,6 +99,7 @@ function normalizeUser(value: unknown): AuthenticatedUser {
     email: user.email ?? "",
     photoUrl: user.photoUrl ?? null,
     mfaRequired: Boolean(user.mfaRequired),
+    isAdmin: Boolean(user.isAdmin),
   };
 }
 
@@ -122,6 +124,18 @@ export async function login(input: LoginInput) {
       body: JSON.stringify(input),
     }),
   );
+}
+
+export async function requestPasswordReset(email: string) {
+  return request<{ message: string }>("/auth/forgot-password", {
+    method: "POST", body: JSON.stringify({ email }),
+  });
+}
+
+export async function resetPassword(token: string, newPassword: string) {
+  return request<void>("/auth/reset-password", {
+    method: "POST", body: JSON.stringify({ token, newPassword }),
+  });
 }
 
 export async function signUp(input: SignUpInput) {
@@ -155,4 +169,28 @@ export async function deleteCurrentUserNotification(id: number, accessToken: str
     { method: "DELETE" },
     accessToken,
   );
+}
+
+export async function getVisitorNotifications(visitorEmail: string, signal?: AbortSignal) {
+  return request<OrderNotification[]>(`/notifications/visitor?visitorEmail=${encodeURIComponent(visitorEmail)}`, { signal });
+}
+
+export async function markVisitorNotificationAsRead(id: number, visitorEmail: string) {
+  return request<OrderNotification>(`/notifications/visitor/${id}/read?visitorEmail=${encodeURIComponent(visitorEmail)}`, { method: "PATCH" });
+}
+
+export async function deleteVisitorNotification(id: number, visitorEmail: string) {
+  return request<void>(`/notifications/visitor/${id}?visitorEmail=${encodeURIComponent(visitorEmail)}`, { method: "DELETE" });
+}
+
+export async function getOrder(id: number, accessToken: string, signal?: AbortSignal) {
+  return request<Order>(`/orders/${id}`, { signal }, accessToken);
+}
+
+export async function updateOrderStatus(
+  id: number,
+  status: Pick<Order, "orderStatus" | "paymentStatus" | "fulfillmentStatus" | "deliveryStatus">,
+  accessToken: string,
+) {
+  return request<Order>(`/orders/${id}/status`, { method: "PATCH", body: JSON.stringify(status) }, accessToken);
 }

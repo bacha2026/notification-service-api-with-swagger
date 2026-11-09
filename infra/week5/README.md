@@ -1,8 +1,7 @@
 # Week 5 Reproducible Platform
 
 `provision.sh` creates the full local platform with persisted Vault, SQL Server,
-RabbitMQ, a one-shot migrator, API, Outbox Relay, primary worker, DLQ recovery
-worker, Next.js, and an optional Angular profile. A normal second run preserves
+RabbitMQ, a one-shot migrator, API, Outbox Relay, primary worker, Next.js, and an optional Angular profile. A normal second run preserves
 volumes and credentials and repeats bootstrap, migration, health, and smoke
 checks safely.
 
@@ -74,7 +73,7 @@ Useful diagnostics:
 
 ```bash
 docker compose -f infra/week5/compose.yml ps
-docker compose -f infra/week5/compose.yml logs --tail 100 api outbox-relay worker dlq-recovery-worker
+docker compose -f infra/week5/compose.yml logs --tail 100 api outbox-relay worker
 bash infra/week5/smoke.sh
 NSA_LIVE_BASE_URL=http://127.0.0.1:8080/ dotnet test \
   notification.tests/NSA.Tests/NSA.Tests.csproj \

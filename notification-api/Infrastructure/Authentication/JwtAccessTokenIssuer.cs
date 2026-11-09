@@ -26,6 +26,7 @@ public sealed class JwtAccessTokenIssuer(IOptions<JwtOptions> options, TimeProvi
             new Claim(ClaimTypes.NameIdentifier, user.Id.ToString("D")),
             new Claim(ClaimTypes.Name, $"{user.FirstName} {user.LastName}"),
             new Claim(ClaimTypes.Email, credential.Email),
+            new Claim(ClaimTypes.Role, user.IsAdmin ? "Admin" : "User"),
             new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString("N"))
         };
         var token = new JwtSecurityToken(

@@ -58,7 +58,7 @@ external delivery.
 | Relay crashes after confirm | It may republish; Inbox suppresses the effect. |
 | Consumer fails before commit | Inbox/effects roll back; delivery remains retryable. |
 | Consumer commits but ACK is lost | Redelivery observes Inbox/terminal state. |
-| Poison command exhausts retries | Week 3 DLQ/parking policy takes over. |
+| Poison command exhausts retries | The command remains in the terminal DLQ. |
 
 ## Companion Week 4 decisions
 

@@ -6,7 +6,7 @@ import { dirname, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
 const requiredComponents = ["api", "next", "migrator"];
-const optionalComponents = ["worker", "outbox-worker", "dlq-worker"];
+const optionalComponents = ["worker", "outbox-worker"];
 const supportedComponents = new Set([...requiredComponents, ...optionalComponents]);
 const publishedImageNames = {
   api: "notification-api",
@@ -14,7 +14,6 @@ const publishedImageNames = {
   migrator: "notification-migrator",
   worker: "notification-worker",
   "outbox-worker": "notification-outbox-worker",
-  "dlq-worker": "notification-dlq-worker",
 };
 const trustedPublishWorkflowPath = ".github/workflows/publish.yml";
 const releaseLabelPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;

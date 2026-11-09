@@ -62,6 +62,7 @@ describe("NotificationBell navigation", () => {
           email: "test@example.test",
           photoUrl: null,
           mfaRequired: false,
+          isAdmin: false,
         },
       },
       isLoginDialogOpen: false,

@@ -19,7 +19,6 @@ using NSA.Application.Configuration;
 using NSA.Infrastructure.Authentication;
 using NSA.Infrastructure.Configuration;
 using NSA.Infrastructure.Health;
-using NSA.Infrastructure.Messaging;
 using NSA.Infrastructure.Observability;
 using NSA.Persistence;
 using NSA.Persistence.Concrete;
@@ -254,7 +253,7 @@ builder.Services.AddSingleton(serviceProvider =>
 builder.Services.AddSingleton(serviceProvider =>
 {
     var options = serviceProvider.GetRequiredService<IOptions<NotificationRecipientOptions>>().Value;
-    return new NotificationRecipientSettings(options.AdminEmail, options.DefaultVisitorEmail);
+    return new NotificationRecipientSettings(options.DefaultVisitorEmail);
 });
 builder.Services.AddSingleton(serviceProvider =>
 {
@@ -267,10 +266,16 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<IPasswordHasher, AspNetPasswordHasher>();
 builder.Services.AddSingleton<IAccessTokenIssuer, JwtAccessTokenIssuer>();
 builder.Services.AddSingleton<ICorrelationIdProvider, ActivityCorrelationIdProvider>();
-RabbitMqConfiguration.ValidateOutboxEnvelope(builder.Configuration);
-builder.Services.AddSingleton<IBulkNotificationFailureInjector, ConfiguredBulkNotificationFailureInjector>();
+builder.Services.AddScoped<IIdempotencyLock, SqlServerIdempotencyLock>();
 builder.Services.AddScoped<IdempotencyStore>();
 builder.Services.AddScoped<IBulkNotificationJobService, BulkNotificationJobService>();
+builder.Services.AddScoped<BulkNotificationProcessor>();
+builder.Services.AddSingleton<IBulkNotificationFailureInjector, ConfiguredBulkNotificationFailureInjector>();
+if (builder.Configuration.GetValue("RabbitMq:Enabled", false))
+{
+    BulkNotificationQueueWorker.ValidateConfiguration(builder.Configuration);
+    builder.Services.AddHostedService<BulkNotificationQueueWorker>();
+}
 
 var app = builder.Build();
 

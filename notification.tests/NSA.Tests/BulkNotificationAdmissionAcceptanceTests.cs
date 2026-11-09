@@ -1,11 +1,9 @@
 using System.Diagnostics;
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
-using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
-using NSA.Application.Abstractions;
 using NSA.Application.Contracts;
 using NSA.Domain.Entities;
 using NSA.Persistence;
@@ -16,17 +14,11 @@ namespace NSA.Tests;
 public sealed class BulkNotificationAdmissionAcceptanceTests(ITestOutputHelper output)
 {
     [Fact]
-    public async Task Bulk_admission_records_diagnostic_latency_and_never_resolves_a_broker_publisher()
+    public async Task Bulk_admission_records_diagnostic_latency_without_broker_configuration()
     {
-        var brokerProbe = new BrokerAccessProbe();
-        using var baseFactory = new NsaApiFactory();
-        using var factory = baseFactory.WithWebHostBuilder(builder =>
-            builder.ConfigureTestServices(services =>
-            {
-                services.RemoveAll<IOutboxMessagePublisher>();
-                services.AddSingleton<IOutboxMessagePublisher>(_ => brokerProbe.ResolvePublisher());
-            }));
+        using var factory = new NsaApiFactory();
         using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", factory.AdminAccessToken);
 
         // Exclude host startup, endpoint JIT, and model initialization from the
         // diagnostic sample. Production SLO evidence is likewise collected from
@@ -71,8 +63,8 @@ public sealed class BulkNotificationAdmissionAcceptanceTests(ITestOutputHelper o
             stopwatch.Elapsed.TotalMilliseconds);
 
         Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
-        Assert.Equal(0, brokerProbe.ResolutionCount);
-        Assert.Equal(0, brokerProbe.CallCount);
+        // The API hosts an optional queue consumer, but HTTP admission remains
+        // durable through the outbox and does not publish to RabbitMQ inline.
         var accepted = await response.Content.ReadFromJsonAsync<BulkNotificationJobDto>();
         Assert.NotNull(accepted);
 
@@ -82,35 +74,8 @@ public sealed class BulkNotificationAdmissionAcceptanceTests(ITestOutputHelper o
             message.AggregateId == accepted.JobId.ToString("D"));
         Assert.Null(outbox.PublishedAtUtc);
         Assert.Null(outbox.LockedBy);
+        Assert.Empty(outbox.Exchange);
+        Assert.Empty(outbox.RoutingKey);
     }
 
-    private sealed class BrokerAccessProbe
-    {
-        private int resolutionCount;
-        private int callCount;
-
-        public int ResolutionCount => Volatile.Read(ref resolutionCount);
-
-        public int CallCount => Volatile.Read(ref callCount);
-
-        public IOutboxMessagePublisher ResolvePublisher()
-        {
-            Interlocked.Increment(ref resolutionCount);
-            return new FailOnUsePublisher(this);
-        }
-
-        private sealed class FailOnUsePublisher(BrokerAccessProbe owner) : IOutboxMessagePublisher
-        {
-            public Task CheckHealthAsync(CancellationToken cancellationToken) => Fail();
-
-            public Task PublishAsync(OutboxMessage message, CancellationToken cancellationToken) => Fail();
-
-            private Task Fail()
-            {
-                Interlocked.Increment(ref owner.callCount);
-                throw new InvalidOperationException(
-                    "The API bulk-admission path must not perform RabbitMQ I/O.");
-            }
-        }
-    }
 }

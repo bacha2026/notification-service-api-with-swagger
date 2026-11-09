@@ -538,10 +538,9 @@ compose run --rm --no-deps migrator
 # Compose to recreate them implicitly as dependencies after their --rm cleanup.
 compose up --detach --no-deps api
 wait_for_health api 120
-compose up --detach --no-deps outbox-relay worker dlq-recovery-worker next
+compose up --detach --no-deps outbox-relay worker next
 wait_for_health outbox-relay 120
 wait_for_health worker 120
-wait_for_health dlq-recovery-worker 120
 wait_for_health next 120
 
 if $with_angular; then
@@ -570,7 +569,7 @@ evidence_file="$evidence_dir/provision-$(date -u +%Y%m%dT%H%M%SZ).txt"
   echo "vault_approle_paths=api:secret/nsa/api,worker:secret/nsa/worker,migrator:secret/nsa/migrator"
   echo "vault_cross_role_reads=denied"
   echo "secret_set_fingerprint_status=$secret_fingerprint_status"
-  for service in vault sqlserver rabbitmq api outbox-relay worker dlq-recovery-worker next; do
+  for service in vault sqlserver rabbitmq api outbox-relay worker next; do
     container_id=$(compose ps --quiet "$service")
     image_ref=$(docker inspect --format '{{.Config.Image}}' "$container_id")
     image_id=$(docker inspect --format '{{.Image}}' "$container_id")

@@ -1,6 +1,6 @@
 using RabbitMQ.Client;
 
-namespace NSA.Worker.Messaging;
+namespace NSA.Worker;
 
 /// <summary>
 /// Broker operations for one manually acknowledged delivery. Keeping this

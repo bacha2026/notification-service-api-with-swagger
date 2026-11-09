@@ -9,7 +9,7 @@ using NSA.Persistence;
 namespace NSA.Service;
 
 public sealed class BulkNotificationJobNotFoundException(Guid jobId)
-    : Exception($"Bulk notification job {jobId} does not exist.");
+    : PermanentMessageException($"Bulk notification job {jobId} does not exist.");
 
 /// <summary>Business outcome of processing a persisted notification job.</summary>
 public enum BulkNotificationProcessingResult
@@ -53,9 +53,7 @@ public sealed class BulkNotificationProcessor
         Guid jobId,
         CancellationToken cancellationToken)
     {
-        await using var transaction = dbContext.Database.IsRelational()
-            ? await dbContext.Database.BeginTransactionAsync(cancellationToken)
-            : null;
+        await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
 
         if (messageId != Guid.Empty)
         {
@@ -71,10 +69,7 @@ public sealed class BulkNotificationProcessor
                         $"Inbox message {messageId} is already associated with another aggregate.");
                 }
 
-                if (transaction is not null)
-                {
-                    await transaction.CommitAsync(cancellationToken);
-                }
+                await transaction.CommitAsync(cancellationToken);
 
                 return BulkNotificationProcessingResult.Completed;
             }
@@ -88,10 +83,7 @@ public sealed class BulkNotificationProcessor
             logger.LogInformation(
                 "Bulk notification job {JobId} is already dead-lettered and cannot be processed again.",
                 job.Id);
-            if (transaction is not null)
-            {
-                await transaction.CommitAsync(cancellationToken);
-            }
+            await transaction.CommitAsync(cancellationToken);
 
             return BulkNotificationProcessingResult.AlreadyDeadLettered;
         }
@@ -104,10 +96,7 @@ public sealed class BulkNotificationProcessor
                 job.Id,
                 job.Status);
             await RecordInboxAsync(messageId, jobId, cancellationToken);
-            if (transaction is not null)
-            {
-                await transaction.CommitAsync(cancellationToken);
-            }
+            await transaction.CommitAsync(cancellationToken);
 
             return BulkNotificationProcessingResult.Completed;
         }
@@ -117,6 +106,7 @@ public sealed class BulkNotificationProcessor
         // proof needed to recover the persisted job instead of discarding valid work.
         var recoveringAmbiguousPublish = job.Status == BulkNotificationJobStatuses.PublishFailed;
 
+        BulkNotificationMessageValidator.Validate(job);
         failureInjector.ThrowIfTriggered(job);
 
         job.Status = BulkNotificationJobStatuses.Processing;
@@ -133,42 +123,24 @@ public sealed class BulkNotificationProcessor
                      .OrderBy(candidate => candidate.Sequence))
         {
             item.AttemptCount++;
-            try
-            {
-                await notificationService.CreateNotificationAsync(
-                    new CreateNotificationRequest(
-                        item.RecipientEmail,
-                        item.Channel,
-                        item.Subject,
-                        item.Body,
-                        item.OrderId)
-                    {
-                        BulkNotificationJobId = job.Id,
-                        BulkNotificationJobItemId = item.Id
-                    },
-                    cancellationToken);
+            await notificationService.CreateNotificationAsync(
+                new CreateNotificationRequest(
+                    item.RecipientEmail,
+                    item.Channel,
+                    item.Subject,
+                    item.Body,
+                    item.OrderId)
+                {
+                    BulkNotificationJobId = job.Id,
+                    BulkNotificationJobItemId = item.Id
+                },
+                cancellationToken);
 
-                item.Status = BulkNotificationItemStatuses.Succeeded;
-                item.LastError = null;
-                job.ProcessedCount++;
-                job.SucceededCount++;
-                await jobs.SaveChangesAsync(cancellationToken);
-            }
-            catch (Exception exception) when (
-                exception is RequestValidationException or ArgumentException
-                && !cancellationToken.IsCancellationRequested)
-            {
-                item.Status = BulkNotificationItemStatuses.Failed;
-                item.LastError = $"{exception.GetType().Name}: validation failed";
-                job.ProcessedCount++;
-                job.FailedCount++;
-                await jobs.SaveChangesAsync(cancellationToken);
-                logger.LogWarning(
-                    exception,
-                    "Bulk notification job {JobId} permanently rejected item {Sequence}.",
-                    job.Id,
-                    item.Sequence);
-            }
+            item.Status = BulkNotificationItemStatuses.Succeeded;
+            item.LastError = null;
+            job.ProcessedCount++;
+            job.SucceededCount++;
+            await jobs.SaveChangesAsync(cancellationToken);
         }
 
         job.Status = job.FailedCount == 0
@@ -190,10 +162,7 @@ public sealed class BulkNotificationProcessor
         }
 
         await jobs.SaveChangesAsync(cancellationToken);
-        if (transaction is not null)
-        {
-            await transaction.CommitAsync(cancellationToken);
-        }
+        await transaction.CommitAsync(cancellationToken);
 
         return BulkNotificationProcessingResult.Completed;
     }
@@ -238,22 +207,24 @@ public sealed class BulkNotificationProcessor
         await jobs.SaveChangesAsync(cancellationToken);
     }
 
-    public async Task MarkDeadLetteredAsync(
+    public async Task<bool> MarkDeadLetteredAsync(
         Guid jobId,
         int attempts,
         CancellationToken cancellationToken)
     {
         var job = await jobs.GetByIdAsync(jobId, cancellationToken);
-        if (job is null || job.Status is BulkNotificationJobStatuses.Completed
-            or BulkNotificationJobStatuses.CompletedWithErrors
-            or BulkNotificationJobStatuses.DeadLettered)
+        if (job is null || job.Status == BulkNotificationJobStatuses.DeadLettered)
         {
-            return;
+            return true;
         }
+
+        if (job.Status is BulkNotificationJobStatuses.Completed or BulkNotificationJobStatuses.CompletedWithErrors)
+            return false;
 
         job.Status = BulkNotificationJobStatuses.DeadLettered;
         job.CompletedAtUtc = timeProvider.GetUtcNow();
         job.Error = $"Processing failed after {attempts} attempts; the command was routed to the dead-letter queue.";
         await jobs.SaveChangesAsync(cancellationToken);
+        return true;
     }
 }

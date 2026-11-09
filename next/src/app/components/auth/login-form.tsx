@@ -71,7 +71,7 @@ export function LoginForm({ onAuthenticated }: LoginFormProps) {
         <Link className="font-semibold text-[#596a45] hover:underline" href="/signup" onClick={() => setLoginDialogOpen(false)}>
           Create an account
         </Link>
-        <Link className="font-semibold text-[#596a45] hover:underline" href="mailto:support@example.test?subject=Password%20reset">
+        <Link className="font-semibold text-[#596a45] hover:underline" href="/forgot-password">
           Forgot password?
         </Link>
       </div>

@@ -18,7 +18,7 @@ inside the same local environment.
 
 Use `infra/week5/provision.sh` as a serialized, safely rerunnable local
 provisioner for persisted Vault, SQL Server, RabbitMQ, one-shot database
-bootstrap and migrator, API, Outbox Relay, primary Worker, DLQ Recovery Worker,
+bootstrap and migrator, API, Outbox Relay, primary Worker,
 Next.js, and optional Angular.
 
 Compose uses named data volumes, loopback-only published ports, an internal
@@ -72,6 +72,6 @@ in-place mutation illustrates why reference identity matters.
 - Run `bash infra/week5/provision.sh --with-angular` twice.
 - Both runs must finish migrations, health checks, and end-to-end smoke; the
   later evidence must report `secret_set_fingerprint_status=stable`.
-- API/Next/Angular/Vault/SQL/RabbitMQ and all three workers must be healthy.
+- API/Next/Angular/Vault/SQL/RabbitMQ and both workers must be healthy.
 - Secret scanning verifies generated values are absent from source, image
   history, and container metadata.

@@ -8,6 +8,13 @@ namespace NSA.Persistence.Concrete;
 /// <summary>EF Core adapter for local account lookup and persistence.</summary>
 public sealed class UserRepository(NotificationDbContext dbContext) : IUserRepository
 {
+    public async Task<IReadOnlyList<string>> GetAdminEmailsAsync(CancellationToken cancellationToken) =>
+        await dbContext.Users
+            .Where(user => user.IsAdmin && user.Credential != null)
+            .Select(user => user.Credential!.Email)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
     public Task<User?> GetByNormalizedEmailAsync(string normalizedEmail, CancellationToken cancellationToken)
     {
         return dbContext.Users
@@ -23,6 +30,9 @@ public sealed class UserRepository(NotificationDbContext dbContext) : IUserRepos
             .Include(user => user.MfaMethods)
             .SingleOrDefaultAsync(user => user.Id == userId, cancellationToken);
     }
+
+    public Task<UserCredential?> GetByPasswordResetTokenHashAsync(string tokenHash, CancellationToken cancellationToken) =>
+        dbContext.UserCredentials.SingleOrDefaultAsync(credential => credential.PasswordResetTokenHash == tokenHash, cancellationToken);
 
     public void Add(User user)
     {

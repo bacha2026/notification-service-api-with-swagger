@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
@@ -25,12 +26,15 @@ public sealed class OrderNotificationWorkflowTests : IClassFixture<NsaApiFactory
         {
             AllowAutoRedirect = false
         });
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", factory.AdminAccessToken);
     }
 
     [Fact]
     public async Task Order_creation_queues_notifications_and_the_worker_creates_in_app_records()
     {
         const string visitorEmail = "visitor@example.test";
+        const string secondAdminEmail = "second-admin@tests.invalid";
+        await factory.AddAdminAsync(secondAdminEmail);
         using var orderResponse = await client.PostAsJsonAsync("/api/v2/orders", new
         {
             visitorEmail
@@ -61,7 +65,7 @@ public sealed class OrderNotificationWorkflowTests : IClassFixture<NsaApiFactory
             Assert.Equal(HttpStatusCode.OK, statusResponse.StatusCode);
             using var status = JsonDocument.Parse(await statusResponse.Content.ReadAsStringAsync());
             Assert.Equal(BulkNotificationJobStatuses.Queued, status.RootElement.GetProperty("status").GetString());
-            Assert.Equal(2, status.RootElement.GetProperty("totalCount").GetInt32());
+            Assert.Equal(3, status.RootElement.GetProperty("totalCount").GetInt32());
             Assert.Equal(0, status.RootElement.GetProperty("processedCount").GetInt32());
         }
 
@@ -73,7 +77,7 @@ public sealed class OrderNotificationWorkflowTests : IClassFixture<NsaApiFactory
                 .Include(candidate => candidate.Items)
                 .SingleAsync(candidate => candidate.Id == jobId);
 
-            Assert.Equal(2, persistedJob.Items.Count);
+            Assert.Equal(3, persistedJob.Items.Count);
             Assert.All(persistedJob.Items, item =>
             {
                 Assert.Equal(orderId, item.OrderId);
@@ -82,7 +86,10 @@ public sealed class OrderNotificationWorkflowTests : IClassFixture<NsaApiFactory
             });
             Assert.Contains(
                 persistedJob.Items,
-                item => item.RecipientEmail == "admin@example.test" && item.Subject == $"New order #{orderId}");
+            item => item.RecipientEmail == NsaApiFactory.AdminEmail && item.Subject == $"New order #{orderId}");
+            Assert.Contains(
+                persistedJob.Items,
+                item => item.RecipientEmail == secondAdminEmail && item.Subject == $"New order #{orderId}");
             Assert.Contains(
                 persistedJob.Items,
                 item => item.RecipientEmail == visitorEmail && item.Subject == $"Order #{orderId} received");
@@ -109,7 +116,7 @@ public sealed class OrderNotificationWorkflowTests : IClassFixture<NsaApiFactory
         using var notifications = JsonDocument.Parse(await notificationsResponse.Content.ReadAsStringAsync());
         var intents = notifications.RootElement.EnumerateArray().ToArray();
 
-        Assert.Equal(2, intents.Length);
+        Assert.Equal(3, intents.Length);
         Assert.All(intents, intent =>
         {
             Assert.Equal(orderId, intent.GetProperty("orderId").GetInt32());
@@ -118,7 +125,11 @@ public sealed class OrderNotificationWorkflowTests : IClassFixture<NsaApiFactory
         });
         Assert.Contains(
             intents,
-            intent => intent.GetProperty("recipientEmail").GetString() == "admin@example.test"
+            intent => intent.GetProperty("recipientEmail").GetString() == NsaApiFactory.AdminEmail
+                && intent.GetProperty("subject").GetString() == $"New order #{orderId}");
+        Assert.Contains(
+            intents,
+            intent => intent.GetProperty("recipientEmail").GetString() == secondAdminEmail
                 && intent.GetProperty("subject").GetString() == $"New order #{orderId}");
         Assert.Contains(
             intents,
@@ -129,8 +140,24 @@ public sealed class OrderNotificationWorkflowTests : IClassFixture<NsaApiFactory
         Assert.Equal(HttpStatusCode.OK, completedResponse.StatusCode);
         using var completed = JsonDocument.Parse(await completedResponse.Content.ReadAsStringAsync());
         Assert.Equal(BulkNotificationJobStatuses.Completed, completed.RootElement.GetProperty("status").GetString());
-        Assert.Equal(2, completed.RootElement.GetProperty("processedCount").GetInt32());
-        Assert.Equal(2, completed.RootElement.GetProperty("succeededCount").GetInt32());
+        Assert.Equal(3, completed.RootElement.GetProperty("processedCount").GetInt32());
+        Assert.Equal(3, completed.RootElement.GetProperty("succeededCount").GetInt32());
+
+        using var adminFeedResponse = await client.GetAsync("/api/v2/auth/notifications");
+        Assert.Equal(HttpStatusCode.OK, adminFeedResponse.StatusCode);
+        using var adminFeed = JsonDocument.Parse(await adminFeedResponse.Content.ReadAsStringAsync());
+        Assert.Contains(adminFeed.RootElement.EnumerateArray(), notification =>
+            notification.GetProperty("recipientEmail").GetString() == NsaApiFactory.AdminEmail
+            && notification.GetProperty("subject").GetString() == $"New order #{orderId}");
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+            "Bearer",
+            await factory.GetAdminAccessTokenAsync(secondAdminEmail));
+        using var secondAdminFeedResponse = await client.GetAsync("/api/v2/auth/notifications");
+        Assert.Equal(HttpStatusCode.OK, secondAdminFeedResponse.StatusCode);
+        using var secondAdminFeed = JsonDocument.Parse(await secondAdminFeedResponse.Content.ReadAsStringAsync());
+        Assert.Contains(secondAdminFeed.RootElement.EnumerateArray(), notification =>
+            notification.GetProperty("recipientEmail").GetString() == secondAdminEmail
+            && notification.GetProperty("subject").GetString() == $"New order #{orderId}");
     }
 
     [Fact]
@@ -191,9 +218,11 @@ public sealed class OrderNotificationWorkflowTests : IClassFixture<NsaApiFactory
 
         var adminNotification = Assert.Single(
             newNotifications,
-            notification => notification.RecipientEmail == "admin@example.test");
+            notification => notification.RecipientEmail == NsaApiFactory.AdminEmail);
         Assert.Equal(NotificationChannel.InApp, adminNotification.Channel);
         Assert.Equal($"Order #{orderId} status updated", adminNotification.Subject);
         Assert.Equal(visitorNotification.Body, adminNotification.Body);
     }
 }
+
+

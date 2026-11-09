@@ -1,4 +1,5 @@
 using Asp.Versioning;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using NSA.Application.Abstractions;
 using NSA.Application.Contracts;
@@ -109,6 +110,7 @@ public sealed class OrdersController(IOrderService orderService) : ControllerBas
     /// <response code="400">One or more status values are invalid.</response>
     /// <response code="404">The requested order does not exist.</response>
     [HttpPatch("{id:int}/status")]
+    [Authorize(Roles = "Admin")]
     [ProducesResponseType(typeof(OrderDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]

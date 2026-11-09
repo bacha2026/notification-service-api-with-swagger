@@ -1,6 +1,9 @@
 [CmdletBinding()]
 param(
-    [string]$BaseUrl = "http://localhost:8080",
+    [string]$BaseUrl = "http://localhost:8081",
+    [string[]]$ComposeFiles = @(),
+    [string]$EnvironmentFile = "",
+    [string]$ComposeProjectName = "nsa-week3",
     [string]$EvidencePath = "",
     [ValidateRange(1, 5000)]
     [int]$MaxAdmissionMilliseconds = 100
@@ -10,9 +13,16 @@ $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.Net.Http
 $apiRoot = Split-Path -Parent $PSScriptRoot
 $repositoryRoot = Split-Path -Parent $apiRoot
-$composeFile = Join-Path $apiRoot "compose.week3.yml"
-$envFile = Join-Path $apiRoot ".env"
-$compose = @("--env-file", $envFile, "-f", $composeFile)
+if ($ComposeFiles.Count -eq 0) {
+    $ComposeFiles = @(Join-Path $apiRoot "compose.week3.yml")
+}
+if ([string]::IsNullOrWhiteSpace($EnvironmentFile)) {
+    $EnvironmentFile = Join-Path $apiRoot ".env"
+}
+$compose = @("--env-file", $EnvironmentFile, "--project-name", $ComposeProjectName)
+foreach ($file in $ComposeFiles) {
+    $compose += @("-f", $file)
+}
 $client = [System.Net.Http.HttpClient]::new()
 $rabbitStarted = $true
 $rabbitStoppedAtUtc = $null
@@ -87,7 +97,7 @@ $evidence = [ordered]@{
         checkoutReplayStatus = $null
         notificationReadPersisted = $null
         concurrentDeleteStatuses = @()
-        deletedGraphCounts = @()
+        remainingGraphCounts = @()
         retainedInboxIdempotencyOrder = @()
     }
     failure = $null
@@ -200,7 +210,7 @@ function Invoke-DatabaseQuery {
     $script64 = [Convert]::ToBase64String(
         [System.Text.Encoding]::UTF8.GetBytes($containerScript))
     $launcher = "echo $script64|base64 -d|bash"
-    $output = docker exec nsa-week3-sqlserver-1 bash -lc $launcher
+    $output = docker compose @compose exec -T sqlserver bash -lc $launcher
     if ($LASTEXITCODE -ne 0) {
         throw "SQL verification failed."
     }
@@ -267,7 +277,7 @@ function Get-RequiredHeader {
 
 try {
     Set-VerificationStage "prerequisites"
-    Assert-True (Test-Path $envFile) "Create notification-api/.env before running this verification."
+    Assert-True (Test-Path -LiteralPath $EnvironmentFile) "Create the configured environment file before running this verification."
 
     $liveBefore = Send-Request (New-Request `
         -Method ([System.Net.Http.HttpMethod]::Get) `
@@ -406,7 +416,7 @@ SELECT
 
     Set-VerificationStage "verify-relay-outage-readiness"
     Assert-True (Wait-ContainerHealth `
-        -Container "nsa-week3-outbox-relay-1" `
+        -Container "$ComposeProjectName-outbox-relay-1" `
         -Expected "unhealthy" `
         -Attempts 20) `
         "Relay readiness did not detect the broker outage."
@@ -423,7 +433,7 @@ SELECT
             3)
     }
     Assert-True (Wait-ContainerHealth `
-        -Container "nsa-week3-rabbitmq-1" `
+        -Container "$ComposeProjectName-rabbitmq-1" `
         -Expected "healthy") `
         "RabbitMQ did not recover."
 
@@ -542,7 +552,7 @@ ORDER BY MigrationId DESC;
     Assert-True ($null -ne $notification) "The completed order notification did not reach its recipient."
 
     $read = Send-Request (New-Request `
-        -Method ([System.Net.Http.HttpMethod]::Patch) `
+        -Method ([System.Net.Http.HttpMethod]::new("PATCH")) `
         -Path "/api/v2/auth/notifications/$($notification.id)/read" `
         -Body $null `
         -AccessToken $accessToken `
@@ -551,6 +561,18 @@ ORDER BY MigrationId DESC;
     Assert-True ([int]$read.StatusCode -eq 200 -and $readBody.isRead) `
         "Opening the notification did not persist read state."
     $evidence.authenticatedRegression.notificationReadPersisted = [bool]$readBody.isRead
+
+    $beforeDeleteRows = @(Invoke-DatabaseQuery @"
+SET NOCOUNT ON;
+SELECT
+  (SELECT COUNT(*) FROM Notifications WHERE BulkNotificationJobId = '$orderJobId'),
+  (SELECT COUNT(*) FROM BulkNotificationJobItems WHERE JobId = '$orderJobId'),
+  (SELECT COUNT(*) FROM BulkNotificationJobs WHERE Id = '$orderJobId'),
+  (SELECT COUNT(*) FROM OutboxMessages WHERE AggregateId = '$orderJobId');
+"@)
+    $beforeDelete = Get-DelimitedValues $beforeDeleteRows[-1]
+    Assert-True ($beforeDelete.Count -eq 4 -and [int]$beforeDelete[0] -ge 1) `
+        "Could not inspect the shared notification job before deletion."
 
     $deleteTaskA = $client.SendAsync((New-Request `
         -Method ([System.Net.Http.HttpMethod]::Delete) `
@@ -589,15 +611,15 @@ SELECT
     $deleted = Get-DelimitedValues $deleteEvidence[-1]
     Assert-True (
         $deleted.Count -eq 7 -and
-        $deleted[0] -eq "0" -and
-        $deleted[1] -eq "0" -and
-        $deleted[2] -eq "0" -and
-        $deleted[3] -eq "0" -and
+        [int]$deleted[0] -eq ([int]$beforeDelete[0] - 1) -and
+        $deleted[1] -eq $beforeDelete[1] -and
+        $deleted[2] -eq "1" -and
+        $deleted[3] -eq "1" -and
         $deleted[4] -eq "1" -and
         $deleted[5] -eq "1" -and
         $deleted[6] -eq "1") `
-        "Delete did not remove the notification graph while retaining replay tombstones and the order."
-    $evidence.authenticatedRegression.deletedGraphCounts = @(
+        "Delete did not remove only the selected notification while retaining the shared job, other recipients, replay receipts, and order."
+    $evidence.authenticatedRegression.remainingGraphCounts = @(
         [int]$deleted[0],
         [int]$deleted[1],
         [int]$deleted[2],
@@ -625,7 +647,7 @@ SELECT
         AuthenticatedCheckoutReplay = [int]$orderReplay.StatusCode
         NotificationReadPersisted = [bool]$readBody.isRead
         ConcurrentDeleteStatuses = "$($deleteStatuses[0]),$($deleteStatuses[1])"
-        DeletedGraphCounts = ($deleted[0..3] -join ",")
+        RemainingGraphCounts = ($deleted[0..3] -join ",")
         RetainedInboxIdempotencyOrder = ($deleted[4..6] -join ",")
         EvidencePath = $EvidencePath
         Result = "PASS"

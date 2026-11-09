@@ -1,0 +1,22 @@
+services:
+  worker:
+    build:
+      context: ..
+      dockerfile: notification.worker/Dockerfile
+    environment:
+      RabbitMq__HostName: rabbitmq
+      RabbitMq__Port: 5672
+      RabbitMq__UserName: "${WEEK3_RABBITMQ_USERNAME:?Set WEEK3_RABBITMQ_USERNAME in .env first}"
+      RabbitMq__Password: "${WEEK3_RABBITMQ_PASSWORD:?Set WEEK3_RABBITMQ_PASSWORD in .env first}"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - week3
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/nsa-worker-ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped

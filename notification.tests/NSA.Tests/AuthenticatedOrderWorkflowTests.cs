@@ -115,10 +115,11 @@ public sealed class AuthenticatedOrderWorkflowTests
 
         // Direct records have no completed job/item association and must not
         // enter the authenticated feed merely by reusing the signed-in email.
-        client.DefaultRequestHeaders.Authorization = null;
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", factory.AdminAccessToken);
         await CreateNotificationAsync(client, firstAccount.Email, "Owned order update", firstOrderId);
         await CreateNotificationAsync(client, firstAccount.Email, "Standalone email update", orderId: null);
-        await CreateNotificationAsync(client, "admin@example.test", "Admin order copy", firstOrderId);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", factory.AdminAccessToken);
+        await CreateNotificationAsync(client, NsaApiFactory.AdminEmail, "Admin order copy", firstOrderId);
         await CreateNotificationAsync(client, firstAccount.Email, "Other account order", secondOrderId);
 
         await using (var scope = factory.Services.CreateAsyncScope())
@@ -145,6 +146,10 @@ public sealed class AuthenticatedOrderWorkflowTests
         Assert.Equal(firstAccount.Email, notification.GetProperty("recipientEmail").GetString());
 
         var notificationId = notification.GetProperty("id").GetInt32();
+        using var notificationResponse = await client.GetAsync($"/api/v2/auth/notifications/{notificationId}");
+        Assert.Equal(HttpStatusCode.OK, notificationResponse.StatusCode);
+        using var notificationDetails = JsonDocument.Parse(await notificationResponse.Content.ReadAsStringAsync());
+        Assert.Equal(notificationId, notificationDetails.RootElement.GetProperty("id").GetInt32());
         using var markRead = await client.PatchAsync($"/api/v2/auth/notifications/{notificationId}/read", null);
         Assert.Equal(HttpStatusCode.OK, markRead.StatusCode);
         using var readBody = JsonDocument.Parse(await markRead.Content.ReadAsStringAsync());
@@ -327,3 +332,4 @@ public sealed class AuthenticatedOrderWorkflowTests
 
     private sealed record AuthenticatedAccount(Guid UserId, string Email, string AccessToken);
 }
+

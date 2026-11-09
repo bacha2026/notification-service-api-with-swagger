@@ -11,6 +11,7 @@ public interface IOrderRepository
     Task<Order?> GetByIdForUserWithItemsAsync(int id, Guid userId, CancellationToken cancellationToken);
     Task<IReadOnlyList<CartItem>> GetCartItemsForOrderAsync(string visitorEmail, CancellationToken cancellationToken);
     void Add(Order order);
+    void Remove(Order order);
     void RemoveCartItems(IEnumerable<CartItem> cartItems);
     Task SaveChangesAsync(CancellationToken cancellationToken);
 }

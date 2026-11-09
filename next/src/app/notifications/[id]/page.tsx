@@ -4,14 +4,20 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { use, useEffect } from "react";
+import { use, useEffect, useState } from "react";
 import { Button } from "@/app/components/ui/button";
+import { DEMO_VISITOR_EMAIL } from "@/app/components/store-provider";
 import { useAuthStore } from "@/app/lib/auth-store";
 import {
   deleteCurrentUserNotification,
+  deleteVisitorNotification,
+  getOrder,
   getCurrentUserNotifications,
+  getVisitorNotifications,
   markCurrentUserNotificationAsRead,
+  markVisitorNotificationAsRead,
   NotificationApiError,
+  updateOrderStatus,
   type OrderNotification,
 } from "@/app/lib/notification-api";
 
@@ -30,16 +36,22 @@ export default function NotificationPage({ params }: { params: Promise<{ id: str
   const session = useAuthStore((state) => state.session);
   const clearSession = useAuthStore((state) => state.clearSession);
   const accessToken = session?.accessToken;
-  const notificationQueryKey = ["auth", "notifications", accessToken] as const;
+  const visitorEmail = DEMO_VISITOR_EMAIL;
+  const identity = accessToken ? `auth:${accessToken}` : `visitor:${visitorEmail}`;
+  const notificationQueryKey = ["notifications", identity] as const;
   const notifications = useQuery({
     queryKey: notificationQueryKey,
-    queryFn: ({ signal }) => getCurrentUserNotifications(accessToken!, signal),
-    enabled: Boolean(accessToken),
+    queryFn: ({ signal }) => accessToken
+      ? getCurrentUserNotifications(accessToken, signal)
+      : getVisitorNotifications(visitorEmail, signal),
+    enabled: Boolean(accessToken || visitorEmail),
     staleTime: 15_000,
     retry: 1,
   });
   const markAsRead = useMutation({
-    mutationFn: () => markCurrentUserNotificationAsRead(notificationId, accessToken!),
+    mutationFn: () => accessToken
+      ? markCurrentUserNotificationAsRead(notificationId, accessToken)
+      : markVisitorNotificationAsRead(notificationId, visitorEmail),
     onSuccess: (updated) => {
       queryClient.setQueryData<OrderNotification[]>(
         notificationQueryKey,
@@ -48,7 +60,9 @@ export default function NotificationPage({ params }: { params: Promise<{ id: str
     },
   });
   const deleteNotification = useMutation({
-    mutationFn: () => deleteCurrentUserNotification(notificationId, accessToken!),
+    mutationFn: () => accessToken
+      ? deleteCurrentUserNotification(notificationId, accessToken)
+      : deleteVisitorNotification(notificationId, visitorEmail),
     onSuccess: () => {
       queryClient.setQueryData<OrderNotification[]>(
         notificationQueryKey,
@@ -59,6 +73,33 @@ export default function NotificationPage({ params }: { params: Promise<{ id: str
     },
   });
   const notification = notifications.data?.find((item) => item.id === notificationId);
+  const isAdmin = Boolean(session?.user.isAdmin && accessToken);
+  const orderQuery = useQuery({
+    queryKey: ["admin", "order", notification?.orderId, accessToken],
+    queryFn: ({ signal }) => getOrder(notification!.orderId!, accessToken!, signal),
+    enabled: Boolean(isAdmin && notification?.orderId),
+  });
+  const [orderStatusSelection, setOrderStatusSelection] = useState<{
+    orderId: number;
+    value: number;
+  } | null>(null);
+  const nextOrderStatus = orderQuery.data && orderStatusSelection?.orderId === orderQuery.data.id
+    ? orderStatusSelection.value
+    : Number(orderQuery.data?.orderStatus ?? 2);
+  const updateStatus = useMutation({
+    mutationFn: () => updateOrderStatus(orderQuery.data!.id, {
+      orderStatus: nextOrderStatus,
+      paymentStatus: Number(orderQuery.data!.paymentStatus),
+      fulfillmentStatus: Number(orderQuery.data!.fulfillmentStatus),
+      deliveryStatus: Number(orderQuery.data!.deliveryStatus),
+    }, accessToken!),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["admin", "order", notification?.orderId] }),
+        queryClient.invalidateQueries({ queryKey: notificationQueryKey }),
+      ]);
+    },
+  });
   const markAsReadMutation = markAsRead.mutate;
   const markAsReadStatus = markAsRead.status;
   const resetMarkAsRead = markAsRead.reset;
@@ -80,10 +121,6 @@ export default function NotificationPage({ params }: { params: Promise<{ id: str
     const error = notifications.error ?? markAsRead.error ?? deleteNotification.error;
     if (error instanceof NotificationApiError && error.status === 401) clearSession();
   }, [clearSession, deleteNotification.error, markAsRead.error, notifications.error]);
-
-  if (!accessToken) {
-    return <section className="page-section"><div className="empty-state"><h1>Sign in to view this notification</h1><Link className="primary-link" href="/login">Go to login</Link></div></section>;
-  }
 
   if (!Number.isInteger(notificationId) || notificationId <= 0) {
     return <section className="page-section"><div className="empty-state"><h1>Notification not found</h1><p>This notification does not exist or does not belong to your account.</p><Link className="primary-link" href="/">Return home</Link></div></section>;
@@ -122,6 +159,23 @@ export default function NotificationPage({ params }: { params: Promise<{ id: str
         <p className="mt-6 whitespace-pre-wrap text-base leading-7 text-[#454d47]">{notification.body}</p>
         {markAsRead.isError && <p className="mt-5 text-sm text-[#a6453d]" role="alert">The notification opened, but it could not be marked as read.</p>}
         {deleteNotification.isError && <p className="mt-5 text-sm text-[#a6453d]" role="alert">We could not delete this notification.</p>}
+        {isAdmin && notification.orderId && (
+          <section className="mt-8 border-t border-[#e8e5dc] pt-6" aria-labelledby="admin-order-status">
+            <h2 className="text-lg font-semibold" id="admin-order-status">Update order status</h2>
+            {orderQuery.isPending && <p className="mt-3 text-sm">Loading order…</p>}
+            {orderQuery.isError && <p className="mt-3 text-sm text-red-700" role="alert">Could not load this order.</p>}
+            {orderQuery.data && <div className="mt-3 flex flex-wrap items-end gap-3">
+              <label className="grid gap-1 text-sm">Order status
+                <select className="rounded border border-[#b8beb5] bg-white px-3 py-2" value={nextOrderStatus} onChange={(event) => setOrderStatusSelection({ orderId: orderQuery.data!.id, value: Number(event.target.value) })}>
+                  {[[1,"Draft"],[2,"Pending"],[3,"Awaiting payment"],[4,"Payment verified"],[5,"Confirmed"],[6,"Preparing"],[7,"Ready for pickup"],[8,"Out for delivery"],[9,"Delivered"],[10,"Completed"],[11,"Cancelled"],[12,"Rejected"],[13,"Refunded"]].map(([value,label]) => <option key={value} value={value}>{label}</option>)}
+                </select>
+              </label>
+              <Button disabled={updateStatus.isPending || nextOrderStatus === Number(orderQuery.data.orderStatus)} onClick={() => updateStatus.mutate()}>{updateStatus.isPending ? "Saving…" : "Save status"}</Button>
+            </div>}
+            {updateStatus.isSuccess && <p className="mt-3 text-sm text-green-800" role="status">Order updated. A notification was sent to the guest.</p>}
+            {updateStatus.isError && <p className="mt-3 text-sm text-red-700" role="alert">Could not update the order status.</p>}
+          </section>
+        )}
       </article>
     </section>
   );

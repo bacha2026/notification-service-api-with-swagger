@@ -12,7 +12,6 @@ infrastructure, and immutable blue/green release control.
 | `notification-api` | Self-contained ASP.NET Core HTTP host, EF migrations, OpenAPI, auth, and health/version endpoints |
 | `notification.outbox.worker` | Self-contained leased SQL Outbox relay with confirmed RabbitMQ publication |
 | `notification.worker` | Self-contained bulk command consumer with durable Inbox deduplication |
-| `notification.dlq.worker` | Self-contained controlled recovery/retry/parking consumer |
 | `notification.tests` | Unit, API contract, workflow, resilience, and durable-admission tests |
 | `next` | Storefront, ten hook corrections, four rendering-mode lab, BFF, and browser tests |
 | `angular` | OnPush/signals/immutable-input demonstration and tests |

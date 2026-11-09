@@ -30,6 +30,21 @@ public sealed class NotificationService(
         return notifications.Select(ToDto).ToList();
     }
 
+    public async Task<NotificationDto?> GetCompletedNotificationForRecipientAsync(
+        int id,
+        string recipientEmail,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(recipientEmail))
+        {
+            throw new RequestValidationException("A recipient email is required.");
+        }
+
+        var notification = await notificationRepository.GetCompletedNotificationForRecipientAsync(
+            id, recipientEmail.Trim(), cancellationToken);
+        return notification is null ? null : ToDto(notification);
+    }
+
     public async Task<NotificationDto?> GetNotificationAsync(int id, CancellationToken cancellationToken)
     {
         var notification = await notificationRepository.GetByIdAsync(id, cancellationToken);

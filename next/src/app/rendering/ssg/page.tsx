@@ -1,7 +1,7 @@
 import { RenderingPage, SnapshotPanel } from "@/app/rendering/_components/rendering-demo";
 import { createRenderingSnapshot } from "@/app/rendering/_lib/rendering-data";
 
-export const dynamic = "error";
+export const dynamic = "error";// route segment configuration that prevents this page from being rendered dynamically
 
 export default function StaticRenderingPage() {
   const snapshot = createRenderingSnapshot("SSG");

@@ -148,7 +148,6 @@ test("mutable image references and manifests without compatibility evidence fail
     migrator: "notification-migrator",
     worker: "notification-worker",
     "outbox-worker": "notification-outbox-worker",
-    "dlq-worker": "notification-dlq-worker",
   };
   const images = Object.entries(imageNames).map(([component, name], index) => {
     const image = `ghcr.io/example/${name}`;

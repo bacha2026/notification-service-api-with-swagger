@@ -90,10 +90,8 @@ public sealed class NotificationDbContext(DbContextOptions<NotificationDbContext
             entity.HasIndex(x => x.BulkNotificationJobId);
             entity.HasIndex(x => x.BulkNotificationJobItemId).IsUnique().HasFilter("[BulkNotificationJobItemId] IS NOT NULL");
             entity.HasData(
-                new Notification { Id = 1, RecipientEmail = "admin@example.test", Channel = NotificationChannel.Email, Subject = "New order #1", Body = "Order #1 for visitor@example.test. Status: Delivered; Payment: Paid; Fulfillment: AssignedToRider; Delivery: Delivered. Total: PHP 1277.00.", OrderId = 1, IsRead = true, CreatedAtUtc = new DateTimeOffset(2026, 7, 8, 3, 31, 0, TimeSpan.Zero), SentAtUtc = new DateTimeOffset(2026, 7, 8, 3, 31, 0, TimeSpan.Zero) },
                 new Notification { Id = 2, RecipientEmail = "visitor@example.test", Channel = NotificationChannel.Email, Subject = "Order #1 received", Body = "Your order #1 was received and is now delivered. Total: PHP 1277.00.", OrderId = 1, IsRead = true, CreatedAtUtc = new DateTimeOffset(2026, 7, 8, 3, 32, 0, TimeSpan.Zero), SentAtUtc = new DateTimeOffset(2026, 7, 8, 3, 32, 0, TimeSpan.Zero) },
                 new Notification { Id = 3, RecipientEmail = "visitor@example.test", Channel = NotificationChannel.Email, Subject = "Order #1 status updated", Body = "Order #1 is delivered. Thank you for your purchase.", OrderId = 1, IsRead = false, CreatedAtUtc = new DateTimeOffset(2026, 7, 8, 5, 15, 0, TimeSpan.Zero), SentAtUtc = new DateTimeOffset(2026, 7, 8, 5, 15, 0, TimeSpan.Zero) },
-                new Notification { Id = 4, RecipientEmail = "admin@example.test", Channel = NotificationChannel.Email, Subject = "New order #2", Body = "Order #2 for visitor@example.test. Status: Preparing; Payment: Paid; Fulfillment: Packing; Delivery: WaitingForRider. Total: PHP 1398.00.", OrderId = 2, IsRead = false, CreatedAtUtc = new DateTimeOffset(2026, 7, 9, 1, 46, 0, TimeSpan.Zero), SentAtUtc = new DateTimeOffset(2026, 7, 9, 1, 46, 0, TimeSpan.Zero) },
                 new Notification { Id = 5, RecipientEmail = "visitor@example.test", Channel = NotificationChannel.Email, Subject = "Order #2 received", Body = "Your order #2 was received and is being prepared. Total: PHP 1398.00.", OrderId = 2, IsRead = false, CreatedAtUtc = new DateTimeOffset(2026, 7, 9, 1, 47, 0, TimeSpan.Zero), SentAtUtc = new DateTimeOffset(2026, 7, 9, 1, 47, 0, TimeSpan.Zero) });
         });
 
@@ -192,6 +190,7 @@ public sealed class NotificationDbContext(DbContextOptions<NotificationDbContext
             entity.Property(credential => credential.Email).HasMaxLength(320).IsRequired();
             entity.Property(credential => credential.NormalizedEmail).HasMaxLength(320).IsRequired();
             entity.Property(credential => credential.PasswordHash).HasMaxLength(1000);
+            entity.Property(credential => credential.PasswordResetTokenHash).HasMaxLength(64).IsFixedLength();
             entity.HasIndex(credential => credential.NormalizedEmail).IsUnique();
             entity.HasIndex(credential => credential.LockoutEndUtc);
         });

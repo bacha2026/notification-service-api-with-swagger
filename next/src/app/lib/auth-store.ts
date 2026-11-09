@@ -9,6 +9,7 @@ export type AuthenticatedUser = {
   email: string;
   photoUrl: string | null;
   mfaRequired: boolean;
+  isAdmin: boolean;
 };
 
 export type AuthSession = {

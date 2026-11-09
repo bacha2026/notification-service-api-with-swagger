@@ -7,8 +7,11 @@ import { useEffect, useState } from "react";
 import { Button } from "@/app/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/app/components/ui/popover";
 import { useAuthStore } from "@/app/lib/auth-store";
+import { DEMO_VISITOR_EMAIL } from "@/app/components/store-provider";
 import {
+  deleteVisitorNotification,
   deleteCurrentUserNotification,
+  getVisitorNotifications,
   getCurrentUserNotifications,
   NotificationApiError,
   type OrderNotification,
@@ -27,23 +30,28 @@ function notificationLabel(notification: OrderNotification) {
   return notification.orderId ? `Order #${notification.orderId}` : "Account notification";
 }
 
-export function NotificationBell() {
+export function NotificationBell({ visitorEmail = DEMO_VISITOR_EMAIL }: { visitorEmail?: string }) {
   const [isOpen, setIsOpen] = useState(false);
   const queryClient = useQueryClient();
   const session = useAuthStore((state) => state.session);
   const clearSession = useAuthStore((state) => state.clearSession);
   const accessToken = session?.accessToken;
-  const notificationQueryKey = ["auth", "notifications", accessToken] as const;
+  const identity = accessToken ? `auth:${accessToken}` : `visitor:${visitorEmail}`;
+  const notificationQueryKey = ["notifications", identity] as const;
   const notifications = useQuery({
     queryKey: notificationQueryKey,
-    queryFn: ({ signal }) => getCurrentUserNotifications(accessToken!, signal),
-    enabled: Boolean(accessToken),
+    queryFn: ({ signal }) => accessToken
+      ? getCurrentUserNotifications(accessToken, signal)
+      : getVisitorNotifications(visitorEmail, signal),
+    enabled: Boolean(accessToken || visitorEmail),
     staleTime: 15_000,
     refetchInterval: 30_000,
     retry: 1,
   });
   const deleteNotification = useMutation({
-    mutationFn: (id: number) => deleteCurrentUserNotification(id, accessToken!),
+    mutationFn: (id: number) => accessToken
+      ? deleteCurrentUserNotification(id, accessToken)
+      : deleteVisitorNotification(id, visitorEmail),
     onSuccess: async (_, deletedId) => {
       queryClient.setQueryData<OrderNotification[]>(
         notificationQueryKey,
@@ -86,7 +94,7 @@ export function NotificationBell() {
         <div className="flex items-center justify-between border-b border-[#e8e5dc] px-4 py-3">
           <div>
             <h2 className="font-semibold">Notifications</h2>
-            <p className="text-xs text-[#69716a]">Updates sent to your account</p>
+            <p className="text-xs text-[#69716a]">Order and account updates</p>
           </div>
           {unreadCount > 0 && <span className="rounded-full bg-[#edf2e4] px-2 py-1 text-xs font-medium text-[#4e6540]">{unreadCount} new</span>}
         </div>

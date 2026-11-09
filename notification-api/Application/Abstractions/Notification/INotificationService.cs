@@ -8,6 +8,8 @@ public interface INotificationService
     Task<IReadOnlyList<NotificationDto>> GetCompletedNotificationsForRecipientAsync(
         string recipientEmail,
         CancellationToken cancellationToken);
+    Task<NotificationDto?> GetCompletedNotificationForRecipientAsync(int id, string recipientEmail, CancellationToken cancellationToken) =>
+        Task.FromResult<NotificationDto?>(null);
     Task<NotificationDto?> GetNotificationAsync(int id, CancellationToken cancellationToken);
     Task<NotificationDto?> MarkCompletedNotificationAsReadForRecipientAsync(int id, string recipientEmail, CancellationToken cancellationToken) =>
         Task.FromResult<NotificationDto?>(null);

@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
@@ -16,6 +17,7 @@ public sealed class ApiContractTests : IClassFixture<NsaApiFactory>
         {
             AllowAutoRedirect = false
         });
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", factory.AdminAccessToken);
     }
 
     [Fact]

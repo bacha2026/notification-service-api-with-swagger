@@ -19,8 +19,8 @@ At the Week 3 checkpoint, move the actual work out of the API and into a more re
 - A separate `notification.worker` reads the queue and processes the work.
 - The worker only marks the job as complete after it has saved its progress in SQL.
 - If a message fails, it is retried a limited number of times. After that, it is sent to a dead-letter queue (DLQ) instead of being endlessly retried.
-- The `notification.dlq.worker` is part of this design and is responsible for handling the failed messages that land in the DLQ. 
-- The historical Compose checkpoint ran SQL Server, RabbitMQ, the API, and the main worker. The cumulative Compose stack now also runs the Outbox Relay and DLQ Recovery Worker.
+- The notification worker routes permanent or exhausted failures to the terminal DLQ.
+- The historical Compose checkpoint ran SQL Server, RabbitMQ, the API, and the main worker. The cumulative Compose stack now also runs the Outbox Relay.
 
 ## Options
 

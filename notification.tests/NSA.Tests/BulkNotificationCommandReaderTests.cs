@@ -1,10 +1,7 @@
-extern alias primary;
-
 using System.Text.Json;
 using RabbitMQ.Client;
-using BulkNotificationCommandInvalidReason = primary::NSA.Worker.Messaging.BulkNotificationCommandInvalidReason;
-using BulkNotificationCommandReader = primary::NSA.Worker.Messaging.BulkNotificationCommandReader;
-using BulkNotificationRequestedV1 = primary::NSA.Application.Contracts.BulkNotificationRequestedV1;
+using NSA.Application.Contracts;
+using NSA.Service;
 
 namespace NSA.Tests;
 
@@ -55,6 +52,21 @@ public sealed class BulkNotificationCommandReaderTests
         var isValid = BulkNotificationCommandReader.TryRead(body, properties, out _, out var reason);
 
         Assert.False(isValid);
+        Assert.Equal(BulkNotificationCommandInvalidReason.Unsupported, reason);
+    }
+
+    [Fact]
+    public void An_envelope_that_disagrees_with_the_job_header_requires_identity_recovery()
+    {
+        var command = new BulkNotificationRequestedV1(1, Guid.NewGuid(), Guid.NewGuid(), "correlation", DateTimeOffset.UtcNow);
+        var body = JsonSerializer.SerializeToUtf8Bytes(command, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        var properties = new BasicProperties
+        {
+            Type = BulkNotificationRequestedV1.MessageType,
+            Headers = new Dictionary<string, object?> { ["x-job-id"] = System.Text.Encoding.UTF8.GetBytes(Guid.NewGuid().ToString("D")) }
+        };
+
+        Assert.False(BulkNotificationCommandReader.TryRead(body, properties, out _, out var reason));
         Assert.Equal(BulkNotificationCommandInvalidReason.Unsupported, reason);
     }
 }

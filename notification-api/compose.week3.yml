@@ -2,6 +2,10 @@
 # generated .env file or process environment; no usable credential is tracked here.
 name: nsa-week3
 
+include:
+  - ../notification.outbox.worker/compose.yml
+  - ../notification.worker/compose.yml
+
 services:
   sqlserver:
     image: mcr.microsoft.com/mssql/server:2022-CU26-ubuntu-22.04@sha256:ba4c8329f48fb8f02e1416be6a930ebfd71268caee78aa985f3af4315e457c89
@@ -48,11 +52,17 @@ services:
   api:
     build:
       context: ..
-      dockerfile: notification-api/Dockerfile.api
+      dockerfile: notification-api/Dockerfile
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_URLS: "http://+:8080"
       HttpsRedirection__Enabled: "false"
+      RabbitMq__Enabled: "true"
+      RabbitMq__HostName: rabbitmq
+      RabbitMq__Port: 5672
+      RabbitMq__UserName: "${WEEK3_RABBITMQ_USERNAME:?Set WEEK3_RABBITMQ_USERNAME in .env first}"
+      RabbitMq__Password: "${WEEK3_RABBITMQ_PASSWORD:?Set WEEK3_RABBITMQ_PASSWORD in .env first}"
+      RabbitMq__FailureInjectionSubject: "${WEEK3_FAILURE_INJECTION_SUBJECT:-}"
       ConnectionStrings__NotificationDb: >-
         Server=sqlserver,1433;Database=NotificationServiceDb;User Id=sa;Password=${WEEK3_SQL_PASSWORD:?Set WEEK3_SQL_PASSWORD in .env first};Encrypt=False;TrustServerCertificate=True;MultipleActiveResultSets=true;Connect Timeout=2;ConnectRetryCount=0
       Database__ApplyMigrationsOnStartup: "true"
@@ -61,6 +71,8 @@ services:
       - "127.0.0.1:8081:8080"
     depends_on:
       sqlserver:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
     networks:
       - week3
@@ -72,91 +84,6 @@ services:
       timeout: 5s
       retries: 3
       start_period: 20s
-    restart: unless-stopped
-
-  outbox-relay:
-    build:
-      context: ..
-      dockerfile: notification-api/Dockerfile.outbox-worker
-    environment:
-      ConnectionStrings__NotificationDb: >-
-        Server=sqlserver,1433;Database=NotificationServiceDb;User Id=sa;Password=${WEEK3_SQL_PASSWORD:?Set WEEK3_SQL_PASSWORD in .env first};Encrypt=False;TrustServerCertificate=True;MultipleActiveResultSets=true;Connect Timeout=2;ConnectRetryCount=0
-      Database__ApplyMigrationsOnStartup: "false"
-      RabbitMq__HostName: rabbitmq
-      RabbitMq__UserName: "${WEEK3_RABBITMQ_USERNAME:?Set WEEK3_RABBITMQ_USERNAME in .env first}"
-      RabbitMq__Password: "${WEEK3_RABBITMQ_PASSWORD:?Set WEEK3_RABBITMQ_PASSWORD in .env first}"
-    depends_on:
-      sqlserver:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-      api:
-        condition: service_healthy
-    networks:
-      - week3
-    healthcheck:
-      test: ["CMD-SHELL", "test -f /tmp/nsa-outbox-worker-ready"]
-      interval: 5s
-      timeout: 3s
-      retries: 3
-      start_period: 10s
-    restart: unless-stopped
-
-  worker:
-    build:
-      context: ..
-      dockerfile: notification-api/Dockerfile.worker
-    environment:
-      ConnectionStrings__NotificationDb: >-
-        Server=sqlserver,1433;Database=NotificationServiceDb;User Id=sa;Password=${WEEK3_SQL_PASSWORD:?Set WEEK3_SQL_PASSWORD in .env first};Encrypt=False;TrustServerCertificate=True;MultipleActiveResultSets=true;Connect Timeout=2;ConnectRetryCount=0
-      Database__ApplyMigrationsOnStartup: "false"
-      RabbitMq__HostName: rabbitmq
-      RabbitMq__UserName: "${WEEK3_RABBITMQ_USERNAME:?Set WEEK3_RABBITMQ_USERNAME in .env first}"
-      RabbitMq__Password: "${WEEK3_RABBITMQ_PASSWORD:?Set WEEK3_RABBITMQ_PASSWORD in .env first}"
-      # Set WEEK3_FAILURE_INJECTION_SUBJECT=[week3-poison] only for the DLQ demo.
-      RabbitMq__FailureInjectionSubject: "${WEEK3_FAILURE_INJECTION_SUBJECT:-}"
-    depends_on:
-      sqlserver:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-      api:
-        condition: service_healthy
-    networks:
-      - week3
-    healthcheck:
-      test: ["CMD-SHELL", "test -f /tmp/nsa-worker-ready"]
-      interval: 5s
-      timeout: 3s
-      retries: 3
-      start_period: 10s
-    restart: unless-stopped
-
-  dlq-recovery-worker:
-    build:
-      context: ..
-      dockerfile: notification-api/Dockerfile.dlq-worker
-    environment:
-      ConnectionStrings__NotificationDb: >-
-        Server=sqlserver,1433;Database=NotificationServiceDb;User Id=sa;Password=${WEEK3_SQL_PASSWORD:?Set WEEK3_SQL_PASSWORD in .env first};Encrypt=False;TrustServerCertificate=True;MultipleActiveResultSets=true;Connect Timeout=2;ConnectRetryCount=0
-      RabbitMq__HostName: rabbitmq
-      RabbitMq__UserName: "${WEEK3_RABBITMQ_USERNAME:?Set WEEK3_RABBITMQ_USERNAME in .env first}"
-      RabbitMq__Password: "${WEEK3_RABBITMQ_PASSWORD:?Set WEEK3_RABBITMQ_PASSWORD in .env first}"
-    depends_on:
-      sqlserver:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-      api:
-        condition: service_healthy
-    networks:
-      - week3
-    healthcheck:
-      test: ["CMD-SHELL", "test -f /tmp/nsa-dlq-recovery-worker-ready"]
-      interval: 5s
-      timeout: 3s
-      retries: 3
-      start_period: 10s
     restart: unless-stopped
 
 volumes:

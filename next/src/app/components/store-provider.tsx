@@ -13,7 +13,7 @@ import {
 import { useAuthStore } from "@/app/lib/auth-store";
 import type { Cart, Order, Product } from "@/app/lib/store-types";
 
-const DEMO_VISITOR_EMAIL = "visitor@example.test";
+export const DEMO_VISITOR_EMAIL = "visitor@example.test";
 const API_PREFIX = "/api/notification";
 const EMPTY_ORDERS: Order[] = [];
 
@@ -44,6 +44,8 @@ type StoreContextValue = {
   ordersState: LoadState;
   ordersError: string | null;
   refreshOrders: () => Promise<void>;
+  deleteOrder: (orderId: number) => Promise<void>;
+  canDeleteOrders: boolean;
   checkout: () => Promise<Order | null>;
   isCheckingOut: boolean;
   cartItemCount: number;
@@ -254,6 +256,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       request.finish();
     }
   }, [accessToken, beginIdentityRequest, visitorEmail]);
+
+  const deleteOrder = useCallback(async (orderId: number) => {
+    if (!accessToken) {
+      throw new Error("Sign in to delete an order.");
+    }
+
+    const request = beginIdentityRequest();
+    try {
+      await apiRequest<void>(`/auth/orders/${orderId}`, "DELETE", undefined, accessToken, request.signal);
+      if (request.isCurrent()) {
+        setOrders((current) => current.filter((order) => order.id !== orderId));
+      }
+    } finally {
+      request.finish();
+    }
+  }, [accessToken, beginIdentityRequest]);
 
   useEffect(() => {
     const request = beginIdentityRequest();
@@ -481,6 +499,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       ordersState: visibleOrdersState,
       ordersError: visibleOrdersError,
       refreshOrders,
+      deleteOrder,
+      canDeleteOrders: Boolean(accessToken),
       checkout,
       isCheckingOut,
       cartItemCount: visibleCart?.items.reduce((total, item) => total + item.quantity, 0) ?? 0,
@@ -491,6 +511,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       visibleCartError,
       visibleCartState,
       checkout,
+      deleteOrder,
+      accessToken,
       isCartMutating,
       isCheckingOut,
       visibleOrders,

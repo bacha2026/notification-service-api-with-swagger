@@ -19,6 +19,7 @@ public sealed class User
     public Gender Gender { get; private set; }
     public string? ContactNumber { get; private set; }
     public string? PhotoUrl { get; private set; }
+    public bool IsAdmin { get; private set; }
     public DateTimeOffset CreatedAtUtc { get; private set; }
     public DateTimeOffset UpdatedAtUtc { get; private set; }
     public UserCredential? Credential { get; private set; }

@@ -2,42 +2,44 @@
 
 An ASP.NET Core 8 API for product catalog, cart, order tracking, notification workflows, and local account authentication. The API uses SQL Server through Entity Framework Core, publishes versioned OpenAPI documents through Swagger, and supports URL-based API versions 1 and 2.
 
-Week 4 makes notification admission durable across broker outages. The API commits each job, its items, and a versioned command in one SQL transaction. A dedicated Outbox Relay publishes that command through RabbitMQ with publisher confirms; separate workers process it and safely recover explicitly rejected commands from the dead-letter queue.
+Week 4 makes notification admission durable across broker outages. The API commits each job, its items, and a versioned command in one SQL transaction. A dedicated Outbox Relay publishes that command through RabbitMQ with publisher confirms. The API consumes the main command queue and processes jobs; the separate notification worker only forwards ready retry messages back to the main queue.
 
 ## Architecture at a glance
 
-There are four independent deployable processes:
+There are three independent deployable processes:
 
 - The API is built from [NSA.csproj](NSA.csproj). It owns HTTP contracts, local account authentication, idempotent job admission, SQL persistence, and status queries. It does not connect to RabbitMQ.
 - The Outbox Relay is built from [NSA.Outbox.Worker.csproj](../notification.outbox.worker/NSA.Outbox.Worker.csproj). It leases pending SQL outbox rows, publishes their stable payloads with confirms, and schedules bounded retries.
-- The Worker Service is built from [NSA.Worker.csproj](../notification.worker/NSA.Worker.csproj). It owns RabbitMQ consumption, command retries, dead-letter routing, and notification processing.
-- The DLQ Recovery Worker is built from [NSA.Dlq.Worker.csproj](../notification.dlq.worker/NSA.Dlq.Worker.csproj). It replays valid commands rejected by the main worker after resetting their persisted job state.
+- The Retry Forwarder is built from [NSA.Worker.csproj](../notification.worker/NSA.Worker.csproj). It only consumes ready retry messages and republishes them to the main command queue. It has no database connection.
 
-Each executable compiles only source within its own project directory. The three workers own their appsettings, persistence model, RabbitMQ configuration/topology, and processing code; there are no project references between the API or worker executables. The primary and DLQ workers each own their consumer lifecycle, readiness checks, AMQP header/property handling, and command-envelope validation.
+The API owns SQL persistence and main-queue processing. The retry forwarder and Outbox Relay are separate executables with no project reference to the API. The API declares the shared topology and registers its queue consumer when `RabbitMq:Enabled` is true. See the [retry-forwarder layout](../notification.worker/README.md) and [relay layout](../notification.outbox.worker/README.md).
 
-The existing folders remain shared code boundaries:
+The following layered folders belong to the API:
 
 - `Presentation` owns controllers, OpenAPI, and global API error handling.
 - `Application` owns use-case contracts, immutable settings, and the persistence/host ports consumed by workflows.
 - `Domain` owns entities, enums, and bulk-job status vocabulary.
 - `Service` owns workflow orchestration and bulk-job processing.
 - `Persistence` owns EF Core repository adapters, the DbContext, and migrations.
-- `Infrastructure` owns the RabbitMQ publisher, topology, health checks, and publication-resilience policy.
+- `Infrastructure` owns authentication, configuration, and SQL health checks.
+
+The API has no RabbitMQ client, publisher, or broker configuration. It commits bulk jobs, items, outbox commands, and idempotency receipts in a SQL transaction. The outbox worker reads those rows and owns publication routing. Legacy outbox `Exchange` and `RoutingKey` columns remain for schema compatibility; new API rows leave them empty. Deploy the updated outbox worker together with this API because older relay validation required those values.
 
 ```text
 POST bulk ----> API ----> SQL job/items + Outbox + idempotency commit
 POST order ---> API ----> SQL order/cart + job/items + Outbox commit
 GET status ---> API ----> SQL
                               |
-                        Outbox Relay -- publisher confirm --> RabbitMQ main queue
+                        Outbox Relay -- confirmed success --> main queue
+                              +-------- permanent failure --> DLQ
+                              +-------- other failure --> delayed retry queue
                                                                   |
                                                             Worker Service
                                                                   |
                          SQL notification effects + Inbox receipt <-+
                                                                   |
-                                          manual ACK, retry, or DLX -> DLQ
-                                                                   |
-                                                 DLQ Recovery Worker -> recovery delay queue
+                                          ACK on success; confirmed failure publication
+                                          delay queues -> retry queue; permanent/exhausted -> DLQ
 ```
 
 RabbitMQ messages contain identifiers and timestamps, not recipient addresses, subjects, or message bodies. Those item details remain in SQL Server.
@@ -52,7 +54,7 @@ For a direct host run:
 
 - [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)
 - A reachable SQL Server instance
-- A reachable RabbitMQ instance
+- A reachable RabbitMQ instance only when running the separate workers
 - Optional: a trusted ASP.NET Core development certificate
 
 For the complete local Week 3 stack:
@@ -72,7 +74,7 @@ The checked-in [global.json](../global.json) selects the latest installed .NET 8
 
 ## Configuration
 
-.NET maps a double underscore in environment-variable names to a configuration colon. For example, `RabbitMq__HostName` overrides `RabbitMq:HostName`.
+.NET maps a double underscore in environment-variable names to a configuration colon. For example, `ConnectionStrings__NotificationDb` overrides `ConnectionStrings:NotificationDb`.
 
 The API and each worker use the `appsettings.json` stored in their own project directory. Environment variables remain the higher-precedence place for deployment-specific values and credentials.
 
@@ -84,19 +86,27 @@ The API and each worker use the `appsettings.json` stored in their own project d
 | `Authentication:Jwt:Issuer` / `Audience` | Token issuer and intended client audience | Non-secret defaults in `appsettings.json` |
 | `Authentication:Jwt:AccessTokenLifetimeMinutes` | Short bearer-token lifetime | `15` minutes |
 | `Authentication:MaxFailedAccessAttempts` / `LockoutMinutes` | Local credential lockout policy | `5` attempts / `15` minutes |
+| `PasswordReset:FrontendUrl` | Public web origin used to build password-reset links | `http://localhost:3000` |
+| `PasswordReset:Smtp:Host` / `Port` / `EnableSsl` | SMTP server used to deliver one-time reset links | Host must be configured; port `587`, TLS enabled |
+| `PasswordReset:Smtp:From` | Verified sender address for reset messages | Must be configured |
+| `PasswordReset:Smtp:UserName` / `Password` | SMTP authentication credentials (keep in environment/secrets) | Optional only if the server permits unauthenticated relay |
 | `BulkNotifications:MaxTrackedJobs` | Maximum active persisted jobs admitted by the API | `1000` |
 | `BulkNotifications:MaxBatchSize` | Maximum items in one bulk request | `100` |
 | `BulkNotifications:CompletedJobRetentionMinutes` | Retention before terminal jobs are removed opportunistically | `60` |
 | `Durability:IdempotencyRetentionHours` | Replay/conflict receipt lifetime; raw keys are never stored | `24` |
+
+Worker-only settings (configure these in the worker projects):
+
+| Key | Purpose | Checked-in behavior |
+| --- | --- | --- |
 | `Outbox:BatchSize` / `LeaseSeconds` | Relay claim batch and multi-instance lease | `50` / `30` seconds |
 | `Outbox:PollIntervalSeconds` / `MaximumBackoffSeconds` | Empty/error polling and retry cap | `2` / `300` seconds |
 | `RabbitMq:HostName` / `Port` | Broker connection | `localhost:5672` |
 | `RabbitMq:UserName` / `Password` | Broker credential | No checked-in value; supply environment-specific credentials |
 | `RabbitMq:VirtualHost` | Broker virtual host | `/` |
 | `RabbitMq:MaxDeliveryAttempts` | Total application processing attempts | `3` |
-| `RabbitMq:MaxDeadLetterReplayAttempts` | Bounded automatic replay attempts for rejected DLQ commands | `3` |
-| `RabbitMq:DeadLetterReplayDelayMilliseconds` | Delay before a recovered command returns to the main queue | `5000` |
-| `RabbitMq:BrokerDeliveryLimit` | Quorum-queue safeguard for broker requeues | `20` |
+| `RabbitMq:RetryDelayMilliseconds` | Fixed timeout delay and initial backoff delay | `5000` |
+| `RabbitMq:MaximumRetryDelayMilliseconds` | Backoff cap | `300000` |
 | `RabbitMq:PrefetchCount` | Concurrent unacknowledged commands per consumer | `1` |
 | `RabbitMq:FailureInjectionSubject` | Exact subject that triggers the local poison demonstration | Disabled by default |
 
@@ -110,8 +120,9 @@ The stable broker names are:
 | Dead-letter exchange | `nsa.notifications.dead-letter` |
 | Dead-letter routing key | `bulk.dead-letter.v1` |
 | Dead-letter quorum queue | `nsa.notifications.bulk.dlq` |
-| Recovery exchange / queue | `nsa.notifications.recovery` / `nsa.notifications.bulk.recovery` |
-| Parking exchange / queue | `nsa.notifications.parking` / `nsa.notifications.bulk.parking` |
+| Retry exchange | `nsa.notifications.retry` |
+| Ready retry queue | `nsa.notifications.bulk.retry` |
+| Retry holding queues (default settings) | `nsa.notifications.bulk.retry.delay.5000`, `.delay.10000`, `.delay.20000` |
 
 The application does not call an external email provider. The worker creates persisted notification records. Polly retry and circuit breaking protect the relay's RabbitMQ publication. A confirmation can still be ambiguous, so retries may duplicate a command; the durable Inbox suppresses repeated database effects.
 
@@ -128,7 +139,7 @@ dotnet list notification.tests/NSA.Tests/NSA.Tests.csproj package --vulnerable -
 
 The solution file intentionally includes the API, Outbox Relay, both consumer projects, the shared worker library, and the test project so a root build cannot silently omit a deployable process or its runtime dependency.
 
-The automated suite covers HTTP idempotency, atomic outbox admission, relay leases/backoff, inbox deduplication, API workflows, worker processing, DLQ recovery state transitions, eligibility checks, and replay-header reset. Compose verification covers the API, relay, primary worker, DLQ recovery worker, SQL Server, and RabbitMQ.
+The automated suite covers HTTP idempotency, atomic outbox admission, relay leases/backoff, inbox deduplication, API workflows, bulk-job processing, retry forwarding, retry limits, and confirmed settlement. Compose verification covers the API, relay, retry forwarder, SQL Server, and RabbitMQ.
 
 Most automated tests use EF Core's in-memory provider and a recording outbox publisher. They exercise API contracts, persisted job behavior, relay state transitions, processor deduplication, provider resilience, and error handling, but they do not prove a live SQL Server lock, RabbitMQ confirm, consumer acknowledgement, container readiness, restart redelivery, or DLQ path. Those scenarios require Compose verification.
 
@@ -136,7 +147,7 @@ Most automated tests use EF Core's in-memory provider and a recording outbox pub
 
 Start SQL Server before the API. RabbitMQ may be unavailable during HTTP admission; start it before the relay and consumers when queued work should drain. The configured SQL account must be able to migrate the database, and the broker account must be able to declare the documented exchanges and quorum queues.
 
-Set `RabbitMq__UserName` and `RabbitMq__Password` in each host process. Broker credentials are intentionally absent from tracked application settings.
+Set `RabbitMq__UserName` and `RabbitMq__Password` in each worker process. The API does not need broker credentials. Broker credentials are intentionally absent from tracked application settings.
 
 The API also requires `Authentication__Jwt__SigningKey` (at least 32 UTF-8 bytes) from an environment variable or secret provider. It intentionally has no checked-in fallback. The workers do not issue or validate API bearer tokens.
 
@@ -151,7 +162,6 @@ After the API has applied migrations, start the relay and both consumers in sepa
 ```powershell
 dotnet run --project notification.outbox.worker/NSA.Outbox.Worker.csproj
 dotnet run --project notification.worker/NSA.Worker.csproj
-dotnet run --project notification.dlq.worker/NSA.Dlq.Worker.csproj
 ```
 
 With the HTTPS launch profile:
@@ -166,7 +176,7 @@ The API's `/health/live` endpoint reports process liveness. `/health/ready` prob
 
 ## Start the Week 3 Compose stack
 
-[compose.week3.yml](compose.week3.yml) builds and starts SQL Server 2022, RabbitMQ 4.3 Management, the API, Outbox Relay, notification worker, and DLQ recovery worker. It uses named volumes for SQL Server and RabbitMQ data and a named bridge network.
+[compose.week3.yml](compose.week3.yml) owns SQL Server, RabbitMQ, and the API, and includes the project-local [retry forwarder Compose file](../notification.worker/compose.yml) and [Outbox worker Compose file](../notification.outbox.worker/compose.yml). The assembled application builds and starts all five services while retaining named volumes for SQL Server and RabbitMQ data and a named bridge network.
 
 Copy the environment template, then replace all blank values in `.env` with strong local credentials and a random JWT signing key of at least 32 characters:
 
@@ -182,7 +192,7 @@ Start and inspect the stack:
 docker compose --env-file notification-api/.env -f notification-api/compose.week3.yml config --quiet
 docker compose --env-file notification-api/.env -f notification-api/compose.week3.yml up --build --detach
 docker compose --env-file notification-api/.env -f notification-api/compose.week3.yml ps
-docker compose --env-file notification-api/.env -f notification-api/compose.week3.yml logs --follow api worker dlq-recovery-worker
+docker compose --env-file notification-api/.env -f notification-api/compose.week3.yml logs --follow api worker
 ```
 
 Local URLs:
@@ -234,13 +244,25 @@ The legacy `/api/notifications` and `/api/v{version}/notifications` CRUD routes 
 
 Successful registration and login return a 15-minute JWT access token. Send it as `Authorization: Bearer <token>` to `GET /api/v2/auth/me`, the `/api/v2/auth/cart` routes, and the `/api/v2/auth/orders` routes. Those routes derive the account identity and email from the verified token rather than accepting a client-supplied email. `GET /api/v2/auth/notifications` returns only records addressed to that verified email whose bulk job is `Completed` and whose job item is `Succeeded`; direct, incomplete, partial-success, admin-recipient, and other-recipient records remain outside the account feed.
 
+`Users.IsAdmin` defaults to `0` for every new account and is returned as `isAdmin` in the profile. The JWT includes the corresponding `Admin` or `User` role claim. Public signup cannot set or change this flag. To promote an account, first register it, then run this SQL as a trusted database operator, replacing the email with the intended account:
+
+```sql
+UPDATE u
+SET IsAdmin = 1
+FROM dbo.Users AS u
+JOIN dbo.UserCredentials AS c ON c.UserId = u.Id
+WHERE c.NormalizedEmail = UPPER(LTRIM(RTRIM('replace-with-admin-email@example.com')));
+```
+
+The promoted account must sign in again to receive an updated role claim. This flag does not by itself protect existing endpoints; admin-only API authorization must be added explicitly where needed.
+
 The migration also creates `UserExternalIdentities` (provider plus immutable provider subject) and `UserMfaMethods` (protected second-factor enrollment metadata). These are forward-compatible data structures only: OAuth provider sign-in, MFA enrollment/challenge, recovery codes, and account recovery flows are deliberately not enabled until their dedicated verified workflows are implemented. OAuth provider tokens are not persisted.
 
 ## Bulk-job behavior
 
 `POST /api/v2/notifications/bulk` validates the request and atomically commits a `BulkNotificationJobs` row, its `BulkNotificationJobItems`, and an `OutboxMessages` row containing `nsa.notifications.bulk-requested.v1`. It returns `202 Accepted` after SQL commits, with a stable status URL and `X-Correlation-ID`; broker availability is not on the request path.
 
-The relay conditionally leases due rows, publishes their persisted message ID, payload, and routing metadata with confirms, and marks them published. Failures release the lease and schedule exponential backoff with jitter. A crash after publish but before the SQL mark can duplicate a delivery; the consumer's composite `(MessageId, Handler)` Inbox receipt makes that redelivery harmless. `PublishFailed` remains readable only for legacy rows.
+The relay conditionally leases due rows and validates the command, job, and notification items. It publishes valid messages to the configured main queue, sends invalid JSON, missing required data, and permanent business errors directly to the DLQ, and sends other failures through delayed retry. Terminal job status is saved before DLQ publication; retry handoffs record an active job as `Retrying`. Only confirmed publication marks the Outbox row published. If publication or terminal status persistence fails, the row remains unpublished and its lease is released with bounded database backoff. A crash after publish but before the SQL mark can duplicate a delivery; the consumer's composite `(MessageId, Handler)` Inbox receipt makes that redelivery harmless. `PublishFailed` remains readable only for legacy rows.
 
 Order placement reuses the same job/outbox flow for its admin and visitor notifications. On SQL Server, order/items, cart removal, job/items, outbox, and an optional idempotency receipt share one transaction. A successful `201 Created` reports `X-Notification-Handoff: Confirmed`, `X-Notification-Job-ID`, and a status link. Capacity or SQL failure rejects the whole checkout rather than committing an order without its notification intent.
 
@@ -255,11 +277,10 @@ Poll `GET /api/v2/notifications/bulk/{jobId}`. Persisted states include:
 - `CompletedWithErrors`
 - `PublishFailed`
 - `DeadLettered`
-- `RecoveryPending`
 
-The worker consumes with `autoAck: false` and prefetch `1`. All effects for a successfully handled command and its Inbox receipt commit before acknowledgement. `BulkNotificationJobs.Status` is an EF Core concurrency token. A receipt-backed duplicate is acknowledged without repeating work; a redelivery for an already `DeadLettered` job is rejected without requeue so RabbitMQ routes it to the DLQ. Permanent request-validation failures are recorded per item and processing continues; unexpected failures roll back processable effects and use command-level retry.
+The API consumes the main queue with `autoAck: false` and prefetch `1`. Notification records, the Inbox receipt, and `Completed` status commit before acknowledgement. Duplicate committed commands are acknowledged without repeating effects. Malformed commands and permanent business failures go directly to the DLQ; other failures use a bounded retry budget. The retry forwarder consumes only the ready retry queue and republishes to the main queue after confirmed handoff. Notifications are exposed through the authenticated `GET /api/v2/auth/notifications` feed and `GET /api/v2/auth/notifications/{id}` endpoint. The `PATCH /api/v2/auth/notifications/{id}/read` endpoint persists `IsRead` when the user marks an item as read.
 
-Retention cleanup preserves `Completed` jobs that still back visible account notifications and never opportunistically removes `DeadLettered`, `RecoveryPending`, or legacy `PublishFailed` jobs. Expired `CompletedWithErrors` aggregates are removed with their invisible partial notifications and Outbox rows. An explicit account notification delete removes only the selected recipient's notification; the shared job, job items, Outbox rows, and other recipients' notifications remain available for retention cleanup and independent recipient actions.
+Retention cleanup preserves `Completed` jobs that still back visible account notifications and never opportunistically removes `DeadLettered` or legacy `PublishFailed` jobs. Expired `CompletedWithErrors` aggregates are removed with their invisible partial notifications and Outbox rows. An explicit account notification delete removes only the selected recipient's notification; the shared job, job items, Outbox rows, and other recipients' notifications remain available for retention cleanup and independent recipient actions.
 
 Application retries use the `x-retry-count` header:
 
@@ -267,31 +288,22 @@ Application retries use the `x-retry-count` header:
 | --- | ---: | --- |
 | 1 | absent or `0` | Republish with `1`; ACK the original only after confirmed publication |
 | 2 | `1` | Republish with `2`; ACK the original only after confirmed publication |
-| 3 | `2` | Persist `DeadLettered`, then reject without requeue |
+| 3 | `2` | Record `DeadLettered`, confirm-publish to DLQ, then ACK |
 
-The main queue's dead-letter settings route the final rejection to `nsa.notifications.bulk.dlq`. The DLQ Recovery Worker accepts only commands whose broker death metadata says they were rejected from the main queue. It changes an eligible `DeadLettered` job to `RecoveryPending`, removes its exhausted `x-retry-count`, publishes it with confirms to a durable five-second recovery queue, and only then acknowledges the original DLQ delivery. The recovery queue dead-letters the command back to the main exchange. This lets the primary worker send the pending admin and visitor notifications without duplicating already-succeeded job items. Malformed, unknown, non-rejected, and replay-limit-exhausted messages are published with confirms to the durable parking queue for inspection. If any recovery persistence or publish operation fails, the DLQ delivery is NACKed with requeue.
+The API consumes `CommandQueue`; the retry forwarder consumes `RetryQueue`. Separate `RetryQueue.delay.<milliseconds>` queues hold delayed attempts using queue-level TTLs, then route them into `RetryQueue` through its base routing key. Holding queues have no application consumer and use [RabbitMQ TTL](https://www.rabbitmq.com/docs/ttl) with [at-least-once dead lettering](https://www.rabbitmq.com/docs/quorum-queues#dead-lettering). The retry forwarder preserves message identity and retry headers, confirms publication to the main exchange, then acknowledges the ready retry delivery. The DLQ has no automatic consumer.
+
+Main and ready retry queues disable automatic broker delivery limits and DLQ routing so the API can persist terminal job status before a DLQ transfer. **An existing main queue must be drained and recreated before deploying this topology.** Follow the [queue upgrade instructions](../notification.worker/README.md); startup never purges queues or SQL data.
 
 ## Opt-in poison-message demonstration
 
 Failure injection is disabled unless `WEEK3_FAILURE_INJECTION_SUBJECT` is explicitly set for the Compose worker. Use it only for a controlled local DLQ demonstration:
 
 ```powershell
-# Retain the failed command in the DLQ long enough to inspect it in the UI.
-docker compose --env-file notification-api/.env -f notification-api/compose.week3.yml stop dlq-recovery-worker
-
 $env:WEEK3_FAILURE_INJECTION_SUBJECT = '[week3-poison]'
-docker compose --env-file notification-api/.env -f notification-api/compose.week3.yml up --detach --force-recreate worker
+docker compose --env-file notification-api/.env -f notification-api/compose.week3.yml up --detach --force-recreate api
 ```
 
-Submitting a bulk item whose subject exactly equals `[week3-poison]` then forces the command-level failure path. Poll its status until it is `DeadLettered`, then open RabbitMQ Management at `http://localhost:15672`, select queue `nsa.notifications.bulk.dlq`, and verify that it has one ready message and no unacknowledged message. Keeping the recovery worker stopped is essential: otherwise it can consume and replay the DLQ entry before the management UI is opened. This is a test hook, not production behavior.
-
-Disable failure injection and recreate the primary worker *before* resuming recovery. The recovery worker will then confirm-publish the retained command through the delay queue, after which the job should complete:
-
-```powershell
-Remove-Item Env:WEEK3_FAILURE_INJECTION_SUBJECT -ErrorAction SilentlyContinue
-docker compose --env-file notification-api/.env -f notification-api/compose.week3.yml up --detach --force-recreate worker
-docker compose --env-file notification-api/.env -f notification-api/compose.week3.yml start dlq-recovery-worker
-```
+Submit a notification with subject `[week3-poison]`. It fails three times, waiting five then ten seconds in retry queues, and remains in `nsa.notifications.bulk.dlq`. Disable injection and recreate the worker after the demonstration. Retained DLQ messages require operator investigation and deliberate correction before any manual replay.
 
 ## Delivery guarantees and remaining boundary
 
@@ -303,12 +315,12 @@ Explicit remaining gaps:
 - Retry republish and acknowledgement are not atomic.
 - Status concurrency detects some conflicting writes but is not a durable processing claim/lease for multiple workers.
 - The demo provider's local idempotency header is not a verified provider deduplication guarantee.
-- Automatic replay is intentionally limited to commands explicitly rejected from the main queue. Broker delivery-limit, malformed, unsupported, unknown-job, and replay-limit-exhausted messages remain in the parking queue for operator investigation. Full reconciliation remains future work.
+- The DLQ is terminal. Saving terminal SQL status and publishing to RabbitMQ are separate operations; failed publication keeps the original delivery available for another transfer attempt.
 
-The API and all three workers are independent build units with no shared project
+The API and all two workers are independent build units with no shared project
 references. The API owns EF Core migrations and exposes a one-shot `--migrate`
-mode used by the existing migrator container; normal production API and worker
-startup explicitly disables automatic migration. Week 6 consumes digest-pinned
+mode used by the existing migrator container; normal production API startup
+disables automatic migration, and workers contain no migration logic. Week 6 consumes digest-pinned
 API/Next/migration artifacts and never rebuilds on the target host.
 
 The ignored `.env` credentials are coupled to the existing named SQL/RabbitMQ volumes. If `.env` is removed or rotated while those volumes remain, newly configured values will not automatically change credentials stored inside the services. Do not delete volumes implicitly; Week 5 provisioning must reconcile both sides or require an explicitly approved recoverable reset.

@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
+using NSA.Application.Abstractions;
 using NSA.Application.Contracts;
 using NSA.Application.Exceptions;
 using NSA.Domain.Entities;
@@ -16,134 +17,62 @@ namespace NSA.Service;
 public sealed class IdempotencyStore(
     NotificationDbContext dbContext,
     DurabilityOptions options,
-    TimeProvider timeProvider)
+    TimeProvider timeProvider,
+    IIdempotencyLock idempotencyLock)
 {
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
 
-    public async Task<IDbContextTransaction?> BeginSerializableTransactionAsync(
-        CancellationToken cancellationToken)
+    public async Task<IDbContextTransaction?> BeginSerializableTransactionAsync(CancellationToken cancellationToken)
     {
-        if (!dbContext.Database.IsRelational()
-            || dbContext.Database.CurrentTransaction is not null)
-        {
-            return null;
-        }
-
-        return await dbContext.Database.BeginTransactionAsync(
-            IsolationLevel.Serializable,
-            cancellationToken);
+        if (dbContext.Database.CurrentTransaction is not null) return null; ////avoids creating a nested or competing transaction and lets the caller’s transaction continue
+        return await dbContext.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);// helps prevent two concurrent requests with the same idempotency key from both creating separate records.
     }
 
     public async Task AcquireLockAsync(
         IdempotencyContext? context,
         CancellationToken cancellationToken)
     {
-        if (context is null
-            || !dbContext.Database.IsSqlServer()
-            || dbContext.Database.CurrentTransaction is null)
-        {
-            return;
-        }
-
-        var identity = $"{context.Scope}\n{context.ActorId}\n{context.Key}";
-        var resource = $"nsa:idempotency:{Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity)))}";
-        await dbContext.Database.ExecuteSqlInterpolatedAsync(
-            $"""
-            DECLARE @lockResult int;
-            EXEC @lockResult = sys.sp_getapplock
-                @Resource={resource},
-                @LockMode='Exclusive',
-                @LockOwner='Transaction',
-                @LockTimeout=10000;
-            IF @lockResult < 0
-                THROW 51000, 'Could not acquire the idempotency request lock.', 1;
-            """,
-            cancellationToken);
+        if (context is null || dbContext.Database.CurrentTransaction is null) return; //avoids acquiring a lock when there is no idempotency context or when there is no active transaction
+        await idempotencyLock.AcquireAsync(context, cancellationToken);
+    }
+    // deletes expired idempotency records to prevent stale data from affecting the current operation. This is done before acquiring the lock to avoid holding the lock for too long.
+    public async Task PurgeExpiredAsync(IdempotencyContext? context, CancellationToken cancellationToken)
+    {
+        if (context is null) return;
+        await dbContext.IdempotencyRecords.Where(record => record.ExpiresAtUtc <= timeProvider.GetUtcNow()).ExecuteDeleteAsync(cancellationToken);
     }
 
-    public async Task PurgeExpiredAsync(
-        IdempotencyContext? context,
-        CancellationToken cancellationToken)
+    public async Task<IdempotentResult<T>?> TryReplayAsync<T>(IdempotencyContext? context,string requestHash,CancellationToken cancellationToken)
     {
-        if (context is null)
-        {
-            return;
-        }
-
-        var now = timeProvider.GetUtcNow();
-        if (dbContext.Database.IsRelational())
-        {
-            await dbContext.IdempotencyRecords
-                .Where(record => record.ExpiresAtUtc <= now)
-                .ExecuteDeleteAsync(cancellationToken);
-            return;
-        }
-
-        var expired = await dbContext.IdempotencyRecords
-            .Where(record => record.ExpiresAtUtc <= now)
-            .ToListAsync(cancellationToken);
-        if (expired.Count > 0)
-        {
-            dbContext.IdempotencyRecords.RemoveRange(expired);
-            await dbContext.SaveChangesAsync(cancellationToken);
-        }
-    }
-
-    public async Task<IdempotentResult<T>?> TryReplayAsync<T>(
-        IdempotencyContext? context,
-        string requestHash,
-        CancellationToken cancellationToken)
-    {
-        if (context is null)
-        {
-            return null;
-        }
+        if (context is null) return null; // no idempotency context means no idempotency key, so there is nothing to replay
 
         var keyHash = HashKey(context.Key);
+
         var existing = await dbContext.IdempotencyRecords
-            .AsNoTracking()
+            .AsNoTracking()// not tracked because we may delete it if expired
             .SingleOrDefaultAsync(
             record => record.Scope == context.Scope
                 && record.ActorId == context.ActorId
                 && record.KeyHash == keyHash,
             cancellationToken);
-        if (existing is null)
+
+        if (existing is null) return null; // no existing record means this is the first request with this idempotency key, so there is nothing to replay
+
+        var now = timeProvider.GetUtcNow();
+
+        if (existing.ExpiresAtUtc <= now) // expired records are removed on the next request
         {
+            var tracked = dbContext.IdempotencyRecords.Local.SingleOrDefault(record => record.Id == existing.Id);
+            await dbContext.IdempotencyRecords.Where(record => record.Id == existing.Id).ExecuteDeleteAsync(cancellationToken);//deletes the database row directly, bypassing EF Core’s change tracker
+           // if the record is being tracked by the change tracker, we need to detach it to avoid EF Core trying to update it later
+            if (tracked is not null) dbContext.Entry(tracked).State = EntityState.Detached;//removes the existing record from the change tracker
             return null;
         }
-
-        if (existing.ExpiresAtUtc <= timeProvider.GetUtcNow())
-        {
-            var tracked = dbContext.IdempotencyRecords.Local
-                .SingleOrDefault(record => record.Id == existing.Id);
-            if (dbContext.Database.IsRelational())
-            {
-                await dbContext.IdempotencyRecords
-                    .Where(record => record.Id == existing.Id)
-                    .ExecuteDeleteAsync(cancellationToken);
-                if (tracked is not null)
-                {
-                    dbContext.Entry(tracked).State = EntityState.Detached;
-                }
-            }
-            else
-            {
-                dbContext.IdempotencyRecords.Remove(tracked ?? existing);
-                await dbContext.SaveChangesAsync(cancellationToken);
-            }
-
-            return null;
-        }
-
-        if (!string.Equals(existing.RequestHash, requestHash, StringComparison.Ordinal))
-        {
-            throw new IdempotencyConflictException(
-                $"{IdempotencyContext.HeaderName} was already used for a different request in this operation.");
-        }
-
-        var value = JsonSerializer.Deserialize<T>(existing.ResponseBody, SerializerOptions)
-            ?? throw new InvalidOperationException("The persisted idempotency response is invalid.");
-        return new IdempotentResult<T>(value, Replayed: true);
+        //If the hashes differ, the client reused the same idempotency key for different request data.
+        if (!string.Equals(existing.RequestHash, requestHash, StringComparison.Ordinal)) throw new IdempotencyConflictException($"{IdempotencyContext.HeaderName} was already used for a different request in this operation.");
+        
+        var value = JsonSerializer.Deserialize<T>(existing.ResponseBody, SerializerOptions) ?? throw new InvalidOperationException("The persisted idempotency response is invalid.");
+        return new IdempotentResult<T>(value, Replayed: true); //returns the stored response and marks it as replayed. The caller can then return that response without executing the original operation again
     }
 
     public void Add<T>(
@@ -154,12 +83,10 @@ public sealed class IdempotencyStore(
         string resourceType,
         string resourceId)
     {
-        if (context is null)
-        {
-            return;
-        }
+        if (context is null) return; // no idempotency context means no idempotency key, so there is nothing to store
 
         var now = timeProvider.GetUtcNow();
+
         dbContext.IdempotencyRecords.Add(new IdempotencyRecord
         {
             Id = Guid.NewGuid(),
@@ -172,7 +99,7 @@ public sealed class IdempotencyStore(
             ResourceType = resourceType,
             ResourceId = resourceId,
             CreatedAtUtc = now,
-            ExpiresAtUtc = now.AddHours(options.IdempotencyRetentionHours)
+            ExpiresAtUtc = now.AddHours(options.IdempotencyRetentionHours) // expires after the configured retention period to prevent stale data from affecting future requests
         });
     }
 

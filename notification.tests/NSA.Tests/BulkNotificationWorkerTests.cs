@@ -6,15 +6,17 @@ using NSA.Application.Contracts;
 using NSA.Application.Exceptions;
 using NSA.Domain.Entities;
 using NSA.Domain.Enums;
-using NSA.Infrastructure.Messaging;
 using NSA.Persistence;
 using NSA.Persistence.Concrete;
 using NSA.Service;
 
 namespace NSA.Tests;
 
-public sealed class BulkNotificationProcessorTests
+public sealed class BulkNotificationProcessorTests : IDisposable
 {
+    private readonly SqliteTestDatabase<NotificationDbContext> database = new();
+    public void Dispose() => database.Dispose();
+
     [Fact]
     public async Task Processor_persists_progress_and_completes_a_successful_job()
     {
@@ -103,7 +105,7 @@ public sealed class BulkNotificationProcessorTests
     }
 
     [Fact]
-    public async Task Processor_records_permanent_validation_failure_and_continues()
+    public async Task Processor_propagates_permanent_business_failure_for_command_level_retry()
     {
         await using var context = CreateContext();
         var job = CreateJob("good", "invalid", "also-good");
@@ -112,18 +114,15 @@ public sealed class BulkNotificationProcessorTests
         var dispatcher = new ControlledNotificationService(permanentFailureSubject: "invalid");
         var processor = CreateProcessor(context, dispatcher);
 
-        await processor.ProcessAsync(job.Id, CancellationToken.None);
+        await Assert.ThrowsAsync<RequestValidationException>(() => processor.ProcessAsync(job.Id, CancellationToken.None));
 
-        Assert.Equal(BulkNotificationJobStatuses.CompletedWithErrors, job.Status);
-        Assert.Equal(3, job.ProcessedCount);
-        Assert.Equal(2, job.SucceededCount);
-        Assert.Equal(1, job.FailedCount);
-        Assert.Equal(BulkNotificationItemStatuses.Failed, job.Items.Single(item => item.Subject == "invalid").Status);
-        Assert.Equal(new[] { "good", "invalid", "also-good" }, dispatcher.Subjects);
+        Assert.Equal(new[] { "good", "invalid" }, dispatcher.Subjects);
+        Assert.Empty(context.InboxMessages);
+
     }
 
     [Fact]
-    public async Task Processor_leaves_transient_failure_for_command_level_retry()
+    public async Task Processor_rolls_back_transient_failure_for_command_level_retry()
     {
         await using var context = CreateContext();
         var job = CreateJob("transient");
@@ -140,9 +139,11 @@ public sealed class BulkNotificationProcessorTests
         var persisted = await context.BulkNotificationJobs
             .Include(candidate => candidate.Items)
             .SingleAsync(candidate => candidate.Id == job.Id);
-        Assert.Equal(BulkNotificationJobStatuses.Processing, persisted.Status);
+        Assert.Equal(BulkNotificationJobStatuses.Queued, persisted.Status);
+        Assert.Null(persisted.StartedAtUtc);
         Assert.Equal(0, persisted.ProcessedCount);
         Assert.Equal(BulkNotificationItemStatuses.Pending, Assert.Single(persisted.Items).Status);
+        Assert.Equal(0, Assert.Single(persisted.Items).AttemptCount);
     }
 
     [Fact]
@@ -230,10 +231,7 @@ public sealed class BulkNotificationProcessorTests
             processor.ProcessAsync(Guid.NewGuid(), CancellationToken.None));
     }
 
-    private static NotificationDbContext CreateContext() =>
-        new(new DbContextOptionsBuilder<NotificationDbContext>()
-            .UseInMemoryDatabase($"bulk-processor-{Guid.NewGuid():N}")
-            .Options);
+    private NotificationDbContext CreateContext() => database.CreateContext();
 
     private static BulkNotificationProcessor CreateProcessor(
         NotificationDbContext context,
@@ -247,7 +245,7 @@ public sealed class BulkNotificationProcessorTests
                 new ConfigurationBuilder()
                     .AddInMemoryCollection(new Dictionary<string, string?>
                     {
-                        ["RabbitMq:FailureInjectionSubject"] = failureInjectionSubject
+                        ["BulkNotifications:FailureInjectionSubject"] = failureInjectionSubject
                     })
                     .Build()),
             TimeProvider.System,

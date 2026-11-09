@@ -7,8 +7,8 @@ x-dotnet-service: &dotnet-service
 
 x-worker-environment: &worker-environment
   DOTNET_ENVIRONMENT: Production
-  Database__ApplyMigrationsOnStartup: "false"
   RabbitMq__HostName: rabbitmq
+  RabbitMq__Port: 5672
 
 services:
   vault-permissions:
@@ -115,7 +115,8 @@ services:
   migrator:
     build:
       context: ../..
-      dockerfile: notification-api/Dockerfile.migrator
+      dockerfile: notification-api/Dockerfile
+      target: migrator
     environment:
       DOTNET_ENVIRONMENT: Production
     secrets:
@@ -132,13 +133,16 @@ services:
     <<: *dotnet-service
     build:
       context: ../..
-      dockerfile: notification-api/Dockerfile.api
+      dockerfile: notification-api/Dockerfile
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://+:8080
       HttpsRedirection__Enabled: "false"
       Database__ApplyMigrationsOnStartup: "false"
       ReverseProxy__TrustForwardedHeaders: "true"
+      RabbitMq__Enabled: "true"
+      RabbitMq__HostName: rabbitmq
+      RabbitMq__Port: 5672
       Release__Color: week5
       Release__Sha: "${RELEASE_SHA:-local-week5}"
       Cors__AllowedOrigins__0: http://localhost:3000
@@ -153,9 +157,15 @@ services:
         target: ConnectionStrings__NotificationDb
       - source: jwt_signing_key
         target: Authentication__Jwt__SigningKey
+      - source: rabbitmq_username
+        target: RabbitMq__UserName
+      - source: rabbitmq_password
+        target: RabbitMq__Password
     depends_on:
       migrator:
         condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl --fail --silent --show-error http://127.0.0.1:8080/health/ready >/dev/null"]
       interval: 5s
@@ -167,7 +177,7 @@ services:
     <<: *dotnet-service
     build:
       context: ../..
-      dockerfile: notification-api/Dockerfile.outbox-worker
+      dockerfile: notification.outbox.worker/Dockerfile
     environment:
       <<: *worker-environment
     secrets:
@@ -183,7 +193,7 @@ services:
       rabbitmq:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "test -f /tmp/nsa-outbox-worker-ready"]
+      test: ["CMD-SHELL", "find /tmp/nsa-outbox-worker-ready -mmin -0.25 -print 2>/dev/null | grep -q ."]
       interval: 5s
       timeout: 3s
       retries: 12
@@ -193,7 +203,7 @@ services:
     <<: *dotnet-service
     build:
       context: ../..
-      dockerfile: notification-api/Dockerfile.worker
+      dockerfile: notification.worker/Dockerfile
     environment:
       <<: *worker-environment
     secrets:
@@ -210,32 +220,6 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "test -f /tmp/nsa-worker-ready"]
-      interval: 5s
-      timeout: 3s
-      retries: 12
-      start_period: 10s
-
-  dlq-recovery-worker:
-    <<: *dotnet-service
-    build:
-      context: ../..
-      dockerfile: notification-api/Dockerfile.dlq-worker
-    environment:
-      <<: *worker-environment
-    secrets:
-      - source: worker_db_connection
-        target: ConnectionStrings__NotificationDb
-      - source: rabbitmq_username
-        target: RabbitMq__UserName
-      - source: rabbitmq_password
-        target: RabbitMq__Password
-    depends_on:
-      api:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "test -f /tmp/nsa-dlq-recovery-worker-ready"]
       interval: 5s
       timeout: 3s
       retries: 12

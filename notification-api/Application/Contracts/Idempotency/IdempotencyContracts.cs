@@ -16,15 +16,11 @@ public sealed record IdempotencyContext(string Scope, string ActorId, string Key
         string actorId,
         string? key)
     {
-        if (key is null)
-        {
-            return null;
-        }
+        if (key is null) return null; // no idempotency key means no idempotency context
+        
 
         var normalizedKey = key.Trim();
-        if (normalizedKey.Length is 0 or > 128
-            || normalizedKey.Any(character => !(char.IsAsciiLetterOrDigit(character)
-                || character is '-' or '_' or '.' or ':')))
+        if (normalizedKey.Length is 0 or > 128 || normalizedKey.Any(character => !(char.IsAsciiLetterOrDigit(character) || character is '-' or '_' or '.' or ':')))
         {
             throw new RequestValidationException(
                 $"{HeaderName} must contain 1-128 ASCII letters, digits, periods, underscores, colons, or hyphens.");

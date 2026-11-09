@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
@@ -21,6 +22,7 @@ public sealed class VisitorCancellationWorkflowTests : IClassFixture<NsaApiFacto
         {
             AllowAutoRedirect = false
         });
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", factory.AdminAccessToken);
     }
 
     [Fact]
@@ -63,7 +65,7 @@ public sealed class VisitorCancellationWorkflowTests : IClassFixture<NsaApiFacto
             .AsNoTracking()
             .Where(notification => notification.OrderId == orderId)
             .ToListAsync());
-        Assert.Equal("admin@example.test", cancellationNotification.RecipientEmail);
+        Assert.Equal(NsaApiFactory.AdminEmail, cancellationNotification.RecipientEmail);
         Assert.Equal(NotificationChannel.InApp, cancellationNotification.Channel);
         Assert.Equal($"Order #{orderId} cancelled by visitor", cancellationNotification.Subject);
         Assert.Contains(visitorEmail, cancellationNotification.Body, StringComparison.Ordinal);
@@ -116,13 +118,13 @@ public sealed class VisitorCancellationWorkflowTests : IClassFixture<NsaApiFacto
         {
             var dbContext = setupScope.ServiceProvider.GetRequiredService<NotificationDbContext>();
             var targetAdmin = Notification.Create(
-                "admin@example.test", NotificationChannel.InApp, "Target admin", "Body", targetOrderId, DateTimeOffset.UtcNow);
+                NsaApiFactory.AdminEmail, NotificationChannel.InApp, "Target admin", "Body", targetOrderId, DateTimeOffset.UtcNow);
             var targetVisitor = Notification.Create(
                 targetEmail, NotificationChannel.InApp, "Target visitor", "Body", targetOrderId, DateTimeOffset.UtcNow);
             var targetDirect = Notification.Create(
                 targetEmail, NotificationChannel.InApp, "Target direct", "Body", null, DateTimeOffset.UtcNow);
             var otherAdmin = Notification.Create(
-                "admin@example.test", NotificationChannel.InApp, "Other admin", "Body", otherOrderId, DateTimeOffset.UtcNow);
+                NsaApiFactory.AdminEmail, NotificationChannel.InApp, "Other admin", "Body", otherOrderId, DateTimeOffset.UtcNow);
             var otherDirect = Notification.Create(
                 otherEmail, NotificationChannel.InApp, "Other direct", "Body", null, DateTimeOffset.UtcNow);
             dbContext.Notifications.AddRange(targetAdmin, targetVisitor, targetDirect, otherAdmin, otherDirect);
@@ -185,3 +187,4 @@ public sealed class VisitorCancellationWorkflowTests : IClassFixture<NsaApiFacto
         return order.Id;
     }
 }
+

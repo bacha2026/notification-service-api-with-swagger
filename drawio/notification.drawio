@@ -13,7 +13,7 @@
         <mxCell id="visitor" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontSize=13;" value="Visitor / Customer&lt;br&gt;visitor@example.test" vertex="1">
           <mxGeometry height="70" width="170" x="75" y="180" as="geometry" />
         </mxCell>
-        <mxCell id="admin" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontSize=13;" value="Admin&lt;br&gt;admin@example.test" vertex="1">
+        <mxCell id="admin" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontSize=13;" value="Admin&lt;br&gt;Any registered Admin-role account" vertex="1">
           <mxGeometry height="70" width="170" x="75" y="280" as="geometry" />
         </mxCell>
         <mxCell id="swaggerClient" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=13;" value="Swagger UI&lt;br&gt;/swagger&lt;br&gt;separate OpenAPI v1 + v2" vertex="1">

@@ -8,6 +8,7 @@ public interface IOrderService
     Task<IReadOnlyList<OrderDto>> GetOrdersForUserAsync(Guid userId, CancellationToken cancellationToken);
     Task<OrderDto?> GetOrderAsync(int id, CancellationToken cancellationToken);
     Task<OrderDto?> GetOrderForUserAsync(int id, Guid userId, CancellationToken cancellationToken);
+    Task<bool> DeleteOrderForUserAsync(int id, Guid userId, CancellationToken cancellationToken);
     Task<CreateOrderResult> CreateOrderAsync(CreateOrderRequest request, CancellationToken cancellationToken);
     Task<CreateOrderResult> CreateOrderAsync(
         CreateOrderRequest request,

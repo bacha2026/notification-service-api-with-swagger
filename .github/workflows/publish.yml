@@ -47,12 +47,10 @@ jobs:
             project: notification-api/NSA.csproj
           - component: worker
             project: notification.worker/NSA.Worker.csproj
-          - component: dlq-worker
-            project: notification.dlq.worker/NSA.Dlq.Worker.csproj
           - component: outbox-worker
             project: notification.outbox.worker/NSA.Outbox.Worker.csproj
           - component: migrator
-            project: notification.migrator/NSA.Migrator.csproj
+            project: notification-api/NSA.csproj
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -180,33 +178,39 @@ jobs:
           - component: api
             image: notification-api
             context: .
-            dockerfile: ./notification-api/Dockerfile.api
+            dockerfile: ./notification-api/Dockerfile
+            target: final
             build_args: ""
           - component: worker
             image: notification-worker
             context: .
-            dockerfile: ./notification-api/Dockerfile.worker
-            build_args: ""
-          - component: dlq-worker
-            image: notification-dlq-worker
-            context: .
-            dockerfile: ./notification-api/Dockerfile.dlq-worker
+            dockerfile: ./notification.worker/Dockerfile
+            target: final
             build_args: ""
           - component: outbox-worker
             image: notification-outbox-worker
             context: .
-            dockerfile: ./notification-api/Dockerfile.outbox-worker
+            dockerfile: ./notification.outbox.worker/Dockerfile
+            target: final
             build_args: ""
           - component: migrator
             image: notification-migrator
             context: .
-            dockerfile: ./notification-api/Dockerfile.migrator
+            dockerfile: ./notification-api/Dockerfile
+            target: migrator
             build_args: ""
           - component: next
             image: notification-web
             context: ./next
             dockerfile: ./next/Dockerfile
+            target: runner
             build_args: RELEASE_ID=${{ github.sha }}
+          - component: angular
+            image: notification-angular
+            context: ./angular
+            dockerfile: ./angular/Dockerfile
+            target: runtime
+            build_args: ""
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -249,6 +253,7 @@ jobs:
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
+          target: ${{ matrix.target }}
           build-args: ${{ matrix.build_args }}
           platforms: linux/amd64
           push: true

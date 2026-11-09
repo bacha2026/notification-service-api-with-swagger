@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Net.Mail;
 using Asp.Versioning;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -55,6 +56,7 @@ public sealed class AuthController(
     /// <response code="401">The credentials are invalid or the account is temporarily locked.</response>
     /// <response code="403">A configured multi-factor challenge must be completed before token issuance.</response>
     /// <response code="429">Too many authentication attempts were submitted from this client.</response>
+    /// <summary>Resets a password using a valid one-time reset token.</summary>
     [AllowAnonymous]
     [EnableRateLimiting("authentication")]
     [HttpPost("login")]
@@ -68,6 +70,31 @@ public sealed class AuthController(
         CancellationToken cancellationToken)
     {
         return Ok(await authenticationService.LoginAsync(request, cancellationToken));
+    }
+
+    /// <summary>Requests a password reset link without revealing whether the account exists.</summary>
+    [AllowAnonymous]
+    [EnableRateLimiting("authentication")]
+    [HttpPost("forgot-password")]
+    [ProducesResponseType(StatusCodes.Status202Accepted)]
+    public async Task<IActionResult> ForgotPassword(ForgotPasswordRequest request, CancellationToken cancellationToken)
+    {
+        try { await authenticationService.RequestPasswordResetAsync(request.Email, cancellationToken); }
+        catch (InvalidOperationException) { /* Keep account existence private when delivery is unavailable. */ }
+        catch (SmtpException) { /* Same generic response for delivery failures. */ }
+        return Accepted(new { message = "If an account exists for that email, a reset link will be sent." });
+    }
+
+    /// <summary>Resets a password using a valid one-time reset token.</summary>
+    [AllowAnonymous]
+    [EnableRateLimiting("authentication")]
+    [HttpPost("reset-password")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> ResetPassword(ResetPasswordRequest request, CancellationToken cancellationToken)
+    {
+        await authenticationService.ResetPasswordAsync(request.Token, request.NewPassword, cancellationToken);
+        return NoContent();
     }
 
     /// <summary>Gets the safe profile for the bearer-token subject.</summary>
@@ -119,6 +146,36 @@ public sealed class AuthController(
         return Ok(await notificationService.GetCompletedNotificationsForRecipientAsync(
             subject.Email,
             cancellationToken));
+    }
+
+    /// <summary>Gets one completed notification addressed to the bearer-token user.</summary>
+    /// <response code="200">Returns the requested notification.</response>
+    /// <response code="401">A valid bearer token is required.</response>
+    /// <response code="404">The notification is incomplete, belongs to another recipient, or does not exist.</response>
+    [Authorize]
+    [HttpGet("notifications/{id:int}")]
+    [ProducesResponseType(typeof(NotificationDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<NotificationDto>> GetCurrentUserNotification(
+        int id,
+        CancellationToken cancellationToken)
+    {
+        var subject = GetAuthenticatedSubject();
+        if (subject is null)
+        {
+            return Unauthorized();
+        }
+
+        var currentUser = await authenticationService.GetCurrentUserAsync(subject.UserId, cancellationToken);
+        if (currentUser is null || !string.Equals(currentUser.Email, subject.Email, StringComparison.OrdinalIgnoreCase))
+        {
+            return Unauthorized();
+        }
+
+        var notification = await notificationService.GetCompletedNotificationForRecipientAsync(
+            id, subject.Email, cancellationToken);
+        return notification is null ? NotFound() : Ok(notification);
     }
 
     /// <summary>Marks one completed notification owned by the bearer-token user as read.</summary>
@@ -312,6 +369,27 @@ public sealed class AuthController(
 
         var order = await orderService.GetOrderForUserAsync(id, subject.UserId, cancellationToken);
         return order is null ? NotFound() : Ok(order);
+    }
+
+    /// <summary>Deletes an order owned by the signed-in account.</summary>
+    /// <response code="204">The order was deleted.</response>
+    /// <response code="401">A valid bearer token is required.</response>
+    /// <response code="404">The order does not belong to the signed-in account or does not exist.</response>
+    [Authorize]
+    [HttpDelete("orders/{id:int}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DeleteCurrentUserOrder(int id, CancellationToken cancellationToken)
+    {
+        var subject = GetAuthenticatedSubject();
+        if (subject is null)
+        {
+            return Unauthorized();
+        }
+
+        var deleted = await orderService.DeleteOrderForUserAsync(id, subject.UserId, cancellationToken);
+        return deleted ? NoContent() : NotFound();
     }
 
     /// <summary>Creates an order from the signed-in account's current cart.</summary>

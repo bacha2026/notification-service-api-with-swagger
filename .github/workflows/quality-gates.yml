@@ -184,31 +184,33 @@ jobs:
         include:
           - component: api
             context: .
-            dockerfile: ./notification-api/Dockerfile.api
+            dockerfile: ./notification-api/Dockerfile
+            target: final
             build_args: ""
           - component: worker
             context: .
-            dockerfile: ./notification-api/Dockerfile.worker
-            build_args: ""
-          - component: dlq-worker
-            context: .
-            dockerfile: ./notification-api/Dockerfile.dlq-worker
+            dockerfile: ./notification.worker/Dockerfile
+            target: final
             build_args: ""
           - component: outbox-worker
             context: .
-            dockerfile: ./notification-api/Dockerfile.outbox-worker
+            dockerfile: ./notification.outbox.worker/Dockerfile
+            target: final
             build_args: ""
           - component: migrator
             context: .
-            dockerfile: ./notification-api/Dockerfile.migrator
+            dockerfile: ./notification-api/Dockerfile
+            target: migrator
             build_args: ""
           - component: next
             context: ./next
             dockerfile: ./next/Dockerfile
+            target: runner
             build_args: RELEASE_ID=${{ github.sha }}
           - component: angular
             context: ./angular
             dockerfile: ./angular/Dockerfile
+            target: runtime
             build_args: ""
     steps:
       - name: Check out source
@@ -224,6 +226,7 @@ jobs:
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
+          target: ${{ matrix.target }}
           build-args: ${{ matrix.build_args }}
           platforms: linux/amd64
           push: false
@@ -334,7 +337,7 @@ jobs:
 
       - name: Run the opt-in xUnit SQL/RabbitMQ integration test
         env:
-          NSA_LIVE_BASE_URL: http://127.0.0.1:8080/
+          NSA_LIVE_BASE_URL: http://127.0.0.1:8081/
         run: >-
           dotnet test notification.tests/NSA.Tests/NSA.Tests.csproj
           --configuration Release

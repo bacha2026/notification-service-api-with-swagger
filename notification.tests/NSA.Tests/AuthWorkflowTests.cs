@@ -21,7 +21,7 @@ public sealed class AuthWorkflowTests
         using var client = CreateClient(factory);
         var email = $"signup-{Guid.NewGuid():N}@example.test";
 
-        using var response = await client.PostAsJsonAsync("/api/v2/auth/signup", ValidSignUp(email));
+        using var response = await client.PostAsJsonAsync("/api/v2/auth/signup", ValidSignUp(email, isAdmin: true));
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         Assert.NotNull(response.Headers.Location);
@@ -30,6 +30,7 @@ public sealed class AuthWorkflowTests
         Assert.False(string.IsNullOrWhiteSpace(body.RootElement.GetProperty("accessToken").GetString()));
         Assert.Equal(email, body.RootElement.GetProperty("user").GetProperty("email").GetString());
         Assert.False(body.RootElement.GetProperty("user").GetProperty("mfaRequired").GetBoolean());
+        Assert.False(body.RootElement.GetProperty("user").GetProperty("isAdmin").GetBoolean());
         Assert.DoesNotContain("password", await response.Content.ReadAsStringAsync(), StringComparison.OrdinalIgnoreCase);
 
         using var scope = factory.Services.CreateScope();
@@ -38,6 +39,45 @@ public sealed class AuthWorkflowTests
             .Single(candidate => candidate.Email == email);
         Assert.NotEqual("SafePassword!123", credential.PasswordHash);
         Assert.False(string.IsNullOrWhiteSpace(credential.PasswordHash));
+    }
+
+    [Fact]
+    public async Task Admin_status_is_exposed_in_the_profile_and_as_a_jwt_role_claim()
+    {
+        using var factory = new NsaApiFactory();
+        using var client = CreateClient(factory);
+        var email = $"admin-{Guid.NewGuid():N}@example.test";
+        using var signUp = await client.PostAsJsonAsync("/api/v2/auth/signup", ValidSignUp(email));
+        Assert.Equal(HttpStatusCode.Created, signUp.StatusCode);
+
+        Guid userId;
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var dbContext = scope.ServiceProvider.GetRequiredService<NotificationDbContext>();
+            var user = await dbContext.Users
+                .Include(candidate => candidate.Credential)
+                .SingleAsync(candidate => candidate.Credential!.Email == email);
+            userId = user.Id;
+            await dbContext.Database.ExecuteSqlInterpolatedAsync(
+                $"UPDATE Users SET IsAdmin = 1 WHERE Id = {userId}");
+        }
+
+        using var login = await client.PostAsJsonAsync("/api/v2/auth/login", new
+        {
+            email,
+            password = "SafePassword!123"
+        });
+        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
+        var token = GetAccessToken(await login.Content.ReadAsStringAsync());
+        var jwt = new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler().ReadJwtToken(token);
+        Assert.Contains(jwt.Claims, claim => claim.Type == System.Security.Claims.ClaimTypes.Role && claim.Value == "Admin");
+
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        using var me = await client.GetAsync("/api/v2/auth/me");
+        Assert.Equal(HttpStatusCode.OK, me.StatusCode);
+        using var profile = JsonDocument.Parse(await me.Content.ReadAsStringAsync());
+        Assert.Equal(userId.ToString(), profile.RootElement.GetProperty("id").GetString());
+        Assert.True(profile.RootElement.GetProperty("isAdmin").GetBoolean());
     }
 
     [Fact]
@@ -131,6 +171,7 @@ public sealed class AuthWorkflowTests
         Assert.Equal(HttpStatusCode.OK, login.StatusCode);
         var token = GetAccessToken(await login.Content.ReadAsStringAsync());
 
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", factory.AdminAccessToken);
         using var createNotification = await client.PostAsJsonAsync("/api/v2/notifications", new
         {
             recipientEmail = email,
@@ -176,6 +217,7 @@ public sealed class AuthWorkflowTests
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
         int completedNotificationId;
+        int pendingNotificationId;
         Guid completedJobId;
         Guid incompleteJobId;
         await using (var scope = factory.Services.CreateAsyncScope())
@@ -267,6 +309,7 @@ public sealed class AuthWorkflowTests
             dbContext.Notifications.AddRange(completedNotification, pendingNotification, incompleteJobNotification);
             await dbContext.SaveChangesAsync();
             completedNotificationId = completedNotification.Id;
+            pendingNotificationId = pendingNotification.Id;
 
             var jobs = scope.ServiceProvider.GetRequiredService<IBulkNotificationJobRepository>();
             var eligibleForCleanup = await jobs.GetCompletedBeforeAsync(now.AddMinutes(1), CancellationToken.None);
@@ -282,6 +325,13 @@ public sealed class AuthWorkflowTests
         Assert.Equal("This body is available only after processing completes.", returned.GetProperty("body").GetString());
         Assert.False(returned.GetProperty("isRead").GetBoolean());
 
+        using var getCompleted = await client.GetAsync($"/api/v2/auth/notifications/{completedNotificationId}");
+        Assert.Equal(HttpStatusCode.OK, getCompleted.StatusCode);
+        using var getCompletedBody = JsonDocument.Parse(await getCompleted.Content.ReadAsStringAsync());
+        Assert.False(getCompletedBody.RootElement.GetProperty("isRead").GetBoolean());
+        using var getIncomplete = await client.GetAsync($"/api/v2/auth/notifications/{pendingNotificationId}");
+        Assert.Equal(HttpStatusCode.NotFound, getIncomplete.StatusCode);
+
         using var markRead = await client.PatchAsync($"/api/v2/auth/notifications/{completedNotificationId}/read", content: null);
         Assert.Equal(HttpStatusCode.OK, markRead.StatusCode);
         using var markedBody = JsonDocument.Parse(await markRead.Content.ReadAsStringAsync());
@@ -293,6 +343,8 @@ public sealed class AuthWorkflowTests
         otherClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
             "Bearer",
             GetAccessToken(await otherSignUp.Content.ReadAsStringAsync()));
+        using var forbiddenRead = await otherClient.GetAsync($"/api/v2/auth/notifications/{completedNotificationId}");
+        Assert.Equal(HttpStatusCode.NotFound, forbiddenRead.StatusCode);
         using var forbiddenDelete = await otherClient.DeleteAsync($"/api/v2/auth/notifications/{completedNotificationId}");
         Assert.Equal(HttpStatusCode.NotFound, forbiddenDelete.StatusCode);
 
@@ -498,9 +550,10 @@ public sealed class AuthWorkflowTests
     private static HttpClient CreateClient(NsaApiFactory factory) =>
         factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
 
-    private static object ValidSignUp(string email) => new
+    private static object ValidSignUp(string email, bool isAdmin = false) => new
     {
         email,
+        isAdmin,
         password = "SafePassword!123",
         firstName = "Taylor",
         lastName = "Customer",
@@ -526,3 +579,4 @@ public sealed class AuthWorkflowTests
     private static string GetLocationPath(Uri location) =>
         location.IsAbsoluteUri ? location.AbsolutePath : location.OriginalString.Split('?', '#')[0];
 }
+

@@ -1,8 +1,6 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Diagnostics;
-using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Configuration;
 using NSA.Application.Configuration;
 using NSA.Application.Contracts;
@@ -427,7 +425,7 @@ public sealed class BulkNotificationJobServiceTests
         var originalStore = new IdempotencyStore(
             harness.Context,
             new DurabilityOptions { IdempotencyRetentionHours = 1 },
-            new ManualTimeProvider(now.AddHours(-2)));
+            new ManualTimeProvider(now.AddHours(-2)), new SqliteIdempotencyLock());
         originalStore.Add(
             context,
             "request-hash",
@@ -439,7 +437,7 @@ public sealed class BulkNotificationJobServiceTests
         var currentStore = new IdempotencyStore(
             harness.Context,
             new DurabilityOptions { IdempotencyRetentionHours = 1 },
-            new ManualTimeProvider(now));
+            new ManualTimeProvider(now), new SqliteIdempotencyLock());
 
         var replay = await currentStore.TryReplayAsync<string>(
             context,
@@ -467,12 +465,9 @@ public sealed class BulkNotificationJobServiceTests
         int completedRetentionMinutes = 60,
         TimeProvider? timeProvider = null)
     {
-        var databaseRoot = new InMemoryDatabaseRoot();
-        var databaseOptions = new DbContextOptionsBuilder<NotificationDbContext>()
-            .UseInMemoryDatabase($"bulk-jobs-{Guid.NewGuid():N}", databaseRoot)
-            .ConfigureWarnings(warnings => warnings.Ignore(CoreEventId.ManyServiceProvidersCreatedWarning))
-            .Options;
-        var context = new NotificationDbContext(databaseOptions);
+        var database = new SqliteTestDatabase<NotificationDbContext>();
+        var databaseOptions = database.Options;
+        var context = database.CreateContext();
         var actualTimeProvider = timeProvider ?? TimeProvider.System;
         var service = CreateService(
             context,
@@ -480,7 +475,7 @@ public sealed class BulkNotificationJobServiceTests
             maxBatchSize,
             completedRetentionMinutes,
             actualTimeProvider);
-        return new TestHarness(context, databaseOptions, service, actualTimeProvider);
+        return new TestHarness(context, databaseOptions, service, actualTimeProvider, database);
     }
 
     private static BulkNotificationJobService CreateService(
@@ -495,14 +490,7 @@ public sealed class BulkNotificationJobServiceTests
             new IdempotencyStore(
                 context,
                 new DurabilityOptions(),
-                timeProvider ?? TimeProvider.System),
-            new ConfigurationBuilder()
-                .AddInMemoryCollection(new Dictionary<string, string?>
-                {
-                    ["RabbitMq:CommandExchange"] = "test.commands",
-                    ["RabbitMq:CommandRoutingKey"] = "bulk.requested"
-                })
-                .Build(),
+                timeProvider ?? TimeProvider.System, new SqliteIdempotencyLock()),
             new BulkNotificationSettings(
                 maxTrackedJobs,
                 maxBatchSize,
@@ -513,9 +501,14 @@ public sealed class BulkNotificationJobServiceTests
         NotificationDbContext Context,
         DbContextOptions<NotificationDbContext> DatabaseOptions,
         BulkNotificationJobService Service,
-        TimeProvider TimeProvider) : IAsyncDisposable
+        TimeProvider TimeProvider,
+        SqliteTestDatabase<NotificationDbContext> Database) : IAsyncDisposable
     {
-        public ValueTask DisposeAsync() => Context.DisposeAsync();
+        public async ValueTask DisposeAsync()
+        {
+            await Context.DisposeAsync();
+            Database.Dispose();
+        }
     }
 
     private sealed class ManualTimeProvider(DateTimeOffset now) : TimeProvider

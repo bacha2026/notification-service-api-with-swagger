@@ -36,13 +36,13 @@ api_tag="nsa-local/notification-api:$revision"
 next_tag="nsa-local/notification-web:$revision"
 migrator_tag="nsa-local/notification-migrator:$revision"
 
-docker build --file "$repo_root/notification-api/Dockerfile.api" --tag "$api_tag" "$repo_root"
+docker build --file "$repo_root/notification-api/Dockerfile" --tag "$api_tag" "$repo_root"
 docker build \
   --build-arg "RELEASE_ID=$revision" \
   --file "$repo_root/next/Dockerfile" \
   --tag "$next_tag" \
   "$repo_root/next"
-docker build --file "$repo_root/notification-api/Dockerfile.migrator" --tag "$migrator_tag" "$repo_root"
+docker build --target migrator --file "$repo_root/notification-api/Dockerfile" --tag "$migrator_tag" "$repo_root"
 
 api_id=$(docker image inspect --format '{{.Id}}' "$api_tag")
 next_id=$(docker image inspect --format '{{.Id}}' "$next_tag")

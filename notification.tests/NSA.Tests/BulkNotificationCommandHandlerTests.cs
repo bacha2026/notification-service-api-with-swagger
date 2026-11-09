@@ -1,12 +1,27 @@
 extern alias primary;
 
 using RabbitMQ.Client;
-using BulkNotificationCommandHandler = primary::NSA.Worker.Handlers.BulkNotificationCommandHandler;
+using Microsoft.Extensions.Configuration;
+using BulkNotificationCommandHandler = primary::NSA.Worker.BulkNotificationCommandHandler;
+using RabbitMqBulkNotificationWorker = primary::NSA.Worker.RabbitMqBulkNotificationWorker;
 
 namespace NSA.Tests;
 
 public sealed class BulkNotificationCommandHandlerTests
 {
+    [Fact]
+    public void Worker_consumes_only_main_and_ready_retry_queues()
+    {
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["RabbitMq:CommandQueue"] = "main",
+            ["RabbitMq:RetryQueue"] = "retry",
+            ["RabbitMq:DeadLetterQueue"] = "dead"
+        }).Build();
+
+        Assert.Equal(new[] { "retry" }, RabbitMqBulkNotificationWorker.ConsumerQueues(configuration));
+    }
+
     [Theory]
     [InlineData(0, 0)]
     [InlineData(2, 2)]

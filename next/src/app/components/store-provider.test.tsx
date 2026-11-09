@@ -15,6 +15,7 @@ function session(id: string, email: string, accessToken: string): AuthSession {
       email,
       photoUrl: null,
       mfaRequired: false,
+      isAdmin: false,
     },
   };
 }

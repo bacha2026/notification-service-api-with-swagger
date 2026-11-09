@@ -139,6 +139,6 @@ GitHub CLI, Node.js, Bash, and Docker, then configure reviewers and main-only
 deployment-branch restrictions on `production-like` before the workflows execute.
 
 Workers deliberately do not have colors: Nginx cannot route queue delivery.
-Roll Outbox Relay, primary worker, and DLQ worker separately from their manifest
+Roll Outbox Relay and primary worker separately from their manifest
 digests only while envelope version 1 remains accepted; Inbox deduplication and
 Outbox leases make brief compatible overlap safe.

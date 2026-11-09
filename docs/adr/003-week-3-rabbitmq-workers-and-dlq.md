@@ -1,76 +1,21 @@
-# ADR 003 — Week 3: RabbitMQ Workers and Dead-Letter Recovery
+# ADR 003: Notification retry queues and terminal dead letters
 
-**Status:** Accepted
+Status: Accepted. Updated 2026-09-30 for permanent failure routing and bounded retries.
 
-**Decision period:** Week 3
+The API commits jobs, notification items, and versioned outbox commands in SQL. The outbox relay loads the command and its persisted job/items, validates required data and referenced orders, and confirm-publishes successful messages to the main queue. Invalid JSON, missing required data, unsupported versions, and permanent business errors go directly to the DLQ; dependency timeouts, HTTP 429/503, application bugs, and unknown exceptions go to delayed retry. The relay declares all destination exchanges and saves terminal job status before publishing permanent failures. The notification worker owns queue declarations; mandatory publication leaves the Outbox pending until routing is available. If RabbitMQ is unavailable, confirmation fails, or terminal status cannot be saved, the database row remains unpublished and is retried with bounded backoff. If SQL fails before a row can be loaded, the relay's lease/due-row scan resumes after SQL recovers.
 
-**Last validated:** 2026-08-24
+The notification worker consumes the main and retry queues, uses manual acknowledgements, and commits notification effects, Completed job status, and an Inbox receipt before acknowledging with BasicAckAsync. Permanent failures go directly to the DLQ. Other processing failures use the MaxDeliveryAttempts budget (three total attempts by default). HTTP/database timeouts use a fixed delay; other retryable failures use exponential backoff. The relay's publication attempts do not consume the worker's processing budget. Persisted Outbox metadata provides authoritative job identity for terminal status on malformed messages; the worker never reconstructs a malformed envelope for processing.
 
-## Context
+Retry delays use durable quorum holding queues named RetryQueue.delay.<milliseconds>, with a queue-level TTL for each delay. Expiration routes messages to the ready RetryQueue through the base retry routing key. The worker directly consumes RetryQueue; holding queues have no application consumer. The initial delay is five seconds, with a five-minute cap. Retry transfers use quorum at-least-once dead lettering; application republishing uses mandatory routing and publisher confirms.
 
-An in-process worker loses queued work when the API restarts, competes for Web
-capacity, and has no durable poison-message isolation. The domain is still one
-bounded context with one data owner, so a business-microservice split would add
-distributed coordination without a justified ownership boundary.
+A failed retry or DLQ publish leaves the original delivery unacknowledged for broker recovery. Retry/DLQ copies preserve message identity, correlation and death history and add failure kind, source, error type, and application retry count. Error headers omit exception messages and notification content. Nonterminal retry status is best effort, but terminal DeadLettered status must be saved before DLQ publication and acknowledgement. A failed terminal SQL update sends the message through delayed retry at the exhausted count without repeating notification processing. SQL status and RabbitMQ publication are separate operations; a failed DLQ publication is retried from the original delivery.
 
-## Decision
+The DLQ is terminal and has no automatic consumer. Investigate and correct the cause before any deliberate manual replay. The separate recovery process has been removed. The API and two workers remain independent build units. Each worker has a small Data/Messaging structure, direct EF access, and only the records and mappings it needs. API authentication, cart/product/order management, HTTP contracts, and repository/service layers are excluded from the worker executables.
 
-Keep a modular monolith in the business sense while deploying thin process
-hosts independently:
+Main and ready retry queues disable broker delivery limits and have no automatic DLQ route. Only confirmed terminal transfers from the outbox or notification worker enter the DLQ, so connection failures cannot bypass the terminal SQL update. A malformed message with no matching persisted Outbox identity cannot change a job based solely on its header; it goes directly to the DLQ.
 
-- The **API** owns HTTP admission and status queries.
-- The **Outbox Relay** owns SQL-to-RabbitMQ publication.
-- The **primary Worker** owns main-queue processing and bounded retry.
-- The **DLQ Recovery Worker** owns safe replay and parking policy.
-- The **migrator** owns schema changes outside ordinary application startup.
-- SQL Server remains the source of truth; RabbitMQ transports versioned command
-  references.
+Deployment: stop and remove the retired recovery service before updating the workers. The main queue's arguments change, so an existing main queue must be drained and recreated. Pause new admissions and the relay, allow the old main and retry queues to drain, then stop the old worker. Recreate only the empty main queue, preserving SQL and retained DLQ messages. Start the new notification worker to establish routing before restarting the relay and admissions. RabbitMQ rejects incompatible queue redeclarations; startup never deletes or purges queues. Fresh brokers require no manual queue setup. New delay bucket names and routing keys avoid changing the legacy holding queues' arguments. Legacy RecoveryPending database values remain readable as ordinary nonterminal states, but are no longer produced. No SQL schema migration is required.
 
-Use durable RabbitMQ topology, persistent messages, manual acknowledgement,
-publisher confirms, and prefetch one for deliberate processing order. The
-primary Worker persists a retry/dead-letter state before settlement. A final
-failure is rejected with `requeue: false`, allowing the main queue's DLX policy
-to retain it in the DLQ.
+Verification covers relay validation/routing, broker-unavailable retention, timeout and backoff decisions, bounded poison handling, confirmed publication before acknowledgement, cancellation, database status failures, and duplicate suppression. Compose starts SQL Server, RabbitMQ, API, relay, and notification worker.
 
-Recovery is conservative. Only a message whose RabbitMQ death metadata proves
-it was explicitly rejected from the configured command queue is automatically
-replayed. The recovery worker persists `RecoveryPending`, clears the exhausted
-main-worker retry budget, confirm-publishes to the delayed recovery queue, and
-only then ACKs the DLQ delivery. Malformed, unsupported, unknown, incorrectly
-dead-lettered, or replay-exhausted messages are confirm-published to a durable
-parking queue.
-
-Broker envelopes contain stable message/job/correlation/schema/timestamp data,
-not recipient, subject, or body. RabbitMQ is at least once; Inbox receipts,
-terminal-state checks, and item-level uniqueness suppress repeated database
-effects.
-
-## Alternatives considered
-
-- **Keep the in-process worker:** lower operational cost, but no durable queue
-  ownership or independent scaling.
-- **RabbitMQ with separate hosts:** selected for durable transport, explicit
-  settlement, replay, and operational visibility.
-- **Multiple business microservices now:** deferred until independent ownership,
-  data, compliance, scaling, or release cadence exists.
-
-## Consequences
-
-- Queue, DLQ, parking, relay backlog, retry, and worker health become operational
-  signals.
-- Publish/mark and consume/ACK cannot be globally atomic, so duplicates are an
-  expected transport behavior rather than an exceptional case.
-- DLQ retention preserves evidence; it does not itself repair a command.
-- Shared SQL is intentional because every process belongs to the same bounded
-  context.
-
-## Verification and Week 3 evidence
-
-- Automated tests cover validation, settlement order, bounded retries, replay
-  eligibility, header reset, parking, and duplicate suppression.
-- Docker Compose starts SQL Server, RabbitMQ Management, API, relay, primary
-  Worker, and DLQ Recovery Worker.
-- The demonstration pauses recovery, inspects a retained DLQ message, resumes
-  recovery, and proves one effect per job item.
-- The ten corrected React hook examples and the architecture presentation are
-  weekly evidence; they do not alter this runtime decision.
+References: [RabbitMQ TTL](https://www.rabbitmq.com/docs/ttl), [quorum dead lettering](https://www.rabbitmq.com/docs/quorum-queues#dead-lettering).

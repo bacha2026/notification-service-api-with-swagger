@@ -88,6 +88,7 @@ describe("NotificationPage hook lifecycle", () => {
           email: "test@example.test",
           photoUrl: null,
           mfaRequired: false,
+          isAdmin: false,
         },
       },
       isLoginDialogOpen: false,

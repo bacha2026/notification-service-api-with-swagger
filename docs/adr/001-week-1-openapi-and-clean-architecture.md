@@ -16,7 +16,7 @@ without referencing the executable Web host.
 
 ## Decision
 
-Use a modular Clean Architecture with these responsibilities:
+Use a modular Clean Architecture for the API with these responsibilities:
 
 - **Domain** owns entities, status vocabularies, and business invariants.
 - **Application** owns use-case contracts, DTOs, settings, exceptions, and
@@ -28,10 +28,12 @@ Use a modular Clean Architecture with these responsibilities:
   shaping.
 - Each executable `Program.cs` remains a thin composition root.
 
-Each deployable project owns and compiles its application, domain, persistence,
-infrastructure, and service code locally. The API additionally owns Presentation
-and EF migrations. No deployable executable references another executable or a
-shared implementation project.
+The API owns its application, domain, persistence, infrastructure, service,
+presentation, and EF migration code. The notification workers use a simpler
+structure: background loops and processing at the root, broker operations under
+Messaging, and minimal EF records/mappings under Data. They access EF directly
+and contain no API services or business repository layers. No executable
+references another executable or a shared implementation project.
 
 Expose OpenAPI 3.0 and Swagger UI at `/swagger`. Generate XML documentation for
 API and Core types, document every endpoint and response code, and keep the

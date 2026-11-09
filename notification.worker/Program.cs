@@ -1,21 +1,9 @@
-using NSA.Application.Abstractions;
-using NSA.Infrastructure.Messaging;
-using NSA.Persistence.Concrete;
-using NSA.Service;
-using NSA.Worker.Consumers;
-using NSA.Worker.Handlers;
-using NSA.Worker.Hosting;
+using NSA.Worker;
 
 var builder = Host.CreateApplicationBuilder(args);
 builder.Configuration.AddKeyPerFile("/run/secrets", optional: true);
-
-builder.Services.AddNotificationWorkerInfrastructure(builder.Configuration);
-builder.Services.AddScoped<INotificationRepository, NotificationRepository>();
-builder.Services.AddScoped<INotificationService, NotificationService>();
-builder.Services.AddScoped<IBulkNotificationJobRepository, BulkNotificationJobRepository>();
-builder.Services.AddSingleton<IBulkNotificationFailureInjector, ConfiguredBulkNotificationFailureInjector>();
-builder.Services.AddScoped<BulkNotificationProcessor>();
+RabbitMqConfiguration.Validate(builder.Configuration);//rejects missing credentials and invalid numeric settings at startup
 builder.Services.AddSingleton<BulkNotificationCommandHandler>();
-builder.Services.AddHostedService<RabbitMqBulkNotificationWorker>();
+builder.Services.AddHostedService<RabbitMqBulkNotificationWorker>();//hosted background service for processing messages from RabbitMQ
 
 await builder.Build().RunAsync();

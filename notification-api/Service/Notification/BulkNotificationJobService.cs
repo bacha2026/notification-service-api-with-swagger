@@ -6,7 +6,6 @@ using NSA.Application.Configuration;
 using NSA.Application.Contracts;
 using NSA.Application.Exceptions;
 using NSA.Domain.Entities;
-using NSA.Infrastructure.Messaging;
 using NSA.Persistence;
 
 namespace NSA.Service;
@@ -15,7 +14,6 @@ public sealed class BulkNotificationJobService(
     IBulkNotificationJobRepository jobs,
     NotificationDbContext dbContext,
     IdempotencyStore idempotencyStore,
-    IConfiguration configuration,
     BulkNotificationSettings settings,
     TimeProvider timeProvider) : IBulkNotificationJobService
 {
@@ -33,24 +31,19 @@ public sealed class BulkNotificationJobService(
         IdempotencyContext? idempotency,
         CancellationToken cancellationToken)
     {
-        if (request.Notifications is null || request.Notifications.Count == 0)
-        {
-            throw new RequestValidationException("At least one notification is required.");
-        }
+        if (request.Notifications is null || request.Notifications.Count == 0) throw new RequestValidationException("At least one notification is required.");
+     
 
-        if (request.Notifications.Count > settings.MaxBatchSize)
-        {
-            throw new RequestValidationException(
-                $"A bulk notification job cannot contain more than {settings.MaxBatchSize} notifications.");
-        }
-
+        if (request.Notifications.Count > settings.MaxBatchSize) throw new RequestValidationException($"A bulk notification job cannot contain more than {settings.MaxBatchSize} notifications.");
+        
+        //Removes leading and trailing whitespace from the email, subject, and body and converts the result into a consistent BulkNotificationItemRequest
         var normalizedItems = request.Notifications.Select(item => new BulkNotificationItemRequest(
             item.RecipientEmail.Trim(),
             item.Channel,
             item.Subject.Trim(),
             item.Body.Trim(),
             item.OrderId)).ToArray();
-
+        //The email is converted to uppercase before hashing so email casing does not cause different idempotency hashes
         var requestHash = IdempotencyRequestHasher.Hash(normalizedItems.Select(item => new
         {
             RecipientEmail = item.RecipientEmail.ToUpperInvariant(),
@@ -61,9 +54,9 @@ public sealed class BulkNotificationJobService(
         }));
 
         await using var transaction = await idempotencyStore.BeginSerializableTransactionAsync(cancellationToken);
-        await idempotencyStore.PurgeExpiredAsync(idempotency, cancellationToken);
-        await idempotencyStore.AcquireLockAsync(idempotency, cancellationToken);
-
+        await idempotencyStore.PurgeExpiredAsync(idempotency, cancellationToken);// purges expired idempotency records to prevent stale data from affecting the current operation
+        await idempotencyStore.AcquireLockAsync(idempotency, cancellationToken); // acquires a lock for the current idempotency scope to prevent concurrent requests with the same idempotency key from creating duplicate jobs
+        // replays a previously stored result using the request hash. If a replay is found, the method commits the transaction and returns the original result instead of creating a duplicate job
         var replay = await idempotencyStore.TryReplayAsync<BulkNotificationJobDto>(
             idempotency,
             requestHash,
@@ -71,7 +64,7 @@ public sealed class BulkNotificationJobService(
 
         if (replay is not null)
         {
-            await CommitAsync(transaction, cancellationToken);
+            await CommitAsync(transaction, cancellationToken);// if replay is found, commit the transaction and return the original result instead of creating a duplicate job
             return replay;
         }
 
@@ -121,7 +114,7 @@ public sealed class BulkNotificationJobService(
             job.Id,
             job.CorrelationId,
             now);
-
+        // this is for durable broker command, Save job + outbox command in one transaction
         dbContext.OutboxMessages.Add(new OutboxMessage
         {
             Id = messageId,
@@ -130,14 +123,17 @@ public sealed class BulkNotificationJobService(
             MessageType = BulkNotificationRequestedV1.MessageType,
             SchemaVersion = BulkNotificationRequestedV1.CurrentSchemaVersion,
             Payload = JsonSerializer.Serialize(command, SerializerOptions),
-            Exchange = RabbitMqConfiguration.GetRequiredString(configuration, "CommandExchange"),
-            RoutingKey = RabbitMqConfiguration.GetRequiredString(configuration, "CommandRoutingKey"),
+            // Legacy non-null columns remain for schema compatibility. The relay owns routing.
+            Exchange = string.Empty,
+            RoutingKey = string.Empty,
             CorrelationId = job.CorrelationId,
             OccurredAtUtc = now,
             NextAttemptAtUtc = now
         });
 
         var response = ToDto(job);
+        // response is stored in the idempotency record to allow replaying the same result for subsequent requests with the same idempotency key and request hash
+        // this is for durable HTTP request receipt and response.
         idempotencyStore.Add(
             idempotency,
             requestHash,
@@ -162,25 +158,18 @@ public sealed class BulkNotificationJobService(
     {
         var cutoff = timeProvider.GetUtcNow().AddMinutes(-settings.CompletedJobRetentionMinutes);
         var expired = await jobs.GetCompletedBeforeAsync(cutoff, cancellationToken);
-        if (expired.Count == 0)
-        {
-            return;
-        }
 
-        var aggregateIds = expired
-            .Select(job => job.Id.ToString("D"))
-            .ToArray();
-        var jobIds = expired
-            .Select(job => job.Id)
-            .ToArray();
-        var expiredNotifications = await dbContext.Notifications
-            .Where(notification => notification.BulkNotificationJobId.HasValue
-                && jobIds.Contains(notification.BulkNotificationJobId.Value))
-            .ToListAsync(cancellationToken);
-        var expiredOutbox = await dbContext.OutboxMessages
-            .Where(message => message.AggregateType == nameof(BulkNotificationJob)
-                && aggregateIds.Contains(message.AggregateId))
-            .ToListAsync(cancellationToken);
+        if (expired.Count == 0) return;
+       
+        var aggregateIds = expired.Select(job => job.Id.ToString("D")).ToArray();
+        var jobIds = expired.Select(job => job.Id).ToArray();
+        var expiredNotifications = await dbContext.Notifications.Where(notification => 
+                                    notification.BulkNotificationJobId.HasValue  && 
+                                    jobIds.Contains(notification.BulkNotificationJobId.Value))
+                                    .ToListAsync(cancellationToken);
+        var expiredOutbox = await dbContext.OutboxMessages.Where(message => message.AggregateType == nameof(BulkNotificationJob)
+                && aggregateIds.Contains(message.AggregateId)).ToListAsync(cancellationToken);
+        
         dbContext.Notifications.RemoveRange(expiredNotifications);
         dbContext.OutboxMessages.RemoveRange(expiredOutbox);
         jobs.RemoveRange(expired);

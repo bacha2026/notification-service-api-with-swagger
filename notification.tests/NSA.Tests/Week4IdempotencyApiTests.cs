@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -17,6 +18,7 @@ public sealed class Week4IdempotencyApiTests
         using var factory = new NsaApiFactory();
         using var client = factory.CreateClient(
             new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", factory.AdminAccessToken);
         const string key = "bulk-http-request-123";
 
         using var first = await client.SendAsync(CreateBulkRequest(
@@ -70,6 +72,7 @@ public sealed class Week4IdempotencyApiTests
         using var factory = new NsaApiFactory();
         using var client = factory.CreateClient(
             new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", factory.AdminAccessToken);
 
         using var response = await client.SendAsync(CreateBulkRequest(
             key,
@@ -86,6 +89,7 @@ public sealed class Week4IdempotencyApiTests
         using var factory = new NsaApiFactory();
         using var client = factory.CreateClient(
             new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", factory.AdminAccessToken);
 
         using var response = await client.SendAsync(CreateBulkRequest(
             new string('a', 129),

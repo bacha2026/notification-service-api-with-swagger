@@ -54,6 +54,20 @@ public sealed record LoginRequest
     public string Password { get; init; } = string.Empty;
 }
 
+public sealed record ForgotPasswordRequest
+{
+    [Required, EmailAddress, StringLength(320)]
+    public string Email { get; init; } = string.Empty;
+}
+
+public sealed record ResetPasswordRequest
+{
+    [Required, StringLength(256, MinimumLength = 32)]
+    public string Token { get; init; } = string.Empty;
+    [Required, StringLength(128, MinimumLength = 12), DataType(DataType.Password)]
+    public string NewPassword { get; init; } = string.Empty;
+}
+
 /// <summary>The safe profile data returned to a signed-in client.</summary>
 public sealed record AuthenticatedUserDto(
     Guid Id,
@@ -61,7 +75,8 @@ public sealed record AuthenticatedUserDto(
     string LastName,
     string Email,
     string? PhotoUrl,
-    bool MfaRequired);
+    bool MfaRequired,
+    bool IsAdmin);
 
 /// <summary>A short-lived bearer token and its associated safe user profile.</summary>
 public sealed record AuthenticationResponse(

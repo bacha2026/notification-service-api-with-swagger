@@ -42,7 +42,7 @@ function initials(firstName: string, lastName: string) {
 export function SiteHeader() {
   const pathname = usePathname();
   const queryClient = useQueryClient();
-  const { cartItemCount } = useStore();
+  const { cartItemCount, visitorEmail } = useStore();
   const session = useAuthStore((state) => state.session);
   const clearSession = useAuthStore((state) => state.clearSession);
   const setLoginDialogOpen = useAuthStore((state) => state.setLoginDialogOpen);
@@ -71,7 +71,7 @@ export function SiteHeader() {
 
           {user ? (
             <>
-              <NotificationBell />
+              <NotificationBell visitorEmail={visitorEmail} />
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button
@@ -105,6 +105,8 @@ export function SiteHeader() {
               </DropdownMenu>
             </>
           ) : (
+            <>
+            <NotificationBell visitorEmail={visitorEmail} />
             <Button
               variant="ghost"
               className="h-9 rounded-md px-3 text-sm font-semibold text-[#f8f6ef] hover:bg-white/10 hover:text-white"
@@ -112,6 +114,7 @@ export function SiteHeader() {
             >
               Login
             </Button>
+            </>
           )}
         </div>
       </header>

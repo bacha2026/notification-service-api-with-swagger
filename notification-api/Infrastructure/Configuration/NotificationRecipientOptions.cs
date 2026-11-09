@@ -9,8 +9,5 @@ public sealed class NotificationRecipientOptions
     public const string SectionName = "NotificationEmails";
 
     [Required, EmailAddress]
-    public string AdminEmail { get; init; } = NotificationDefaults.AdminEmail;
-
-    [Required, EmailAddress]
     public string DefaultVisitorEmail { get; init; } = NotificationDefaults.VisitorEmail;
 }

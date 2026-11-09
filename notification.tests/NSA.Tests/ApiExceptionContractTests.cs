@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -17,7 +18,7 @@ public sealed class ApiExceptionContractTests
     public async Task Typed_request_validation_exception_returns_400_and_preserves_v1_deprecation_headers()
     {
         using var factory = new ExceptionApiFactory();
-        using var client = factory.CreateClient();
+        using var client = CreateAdminClient(factory);
 
         using var response = await client.GetAsync(
             "/api/v1/notifications?recipientEmail=domain%40example.com");
@@ -34,7 +35,7 @@ public sealed class ApiExceptionContractTests
     public async Task Generic_argument_exception_returns_sanitized_500()
     {
         using var factory = new ExceptionApiFactory();
-        using var client = factory.CreateClient();
+        using var client = CreateAdminClient(factory);
 
         using var response = await client.GetAsync(
             "/api/v2/notifications?recipientEmail=argument%40example.com");
@@ -49,7 +50,7 @@ public sealed class ApiExceptionContractTests
     public async Task Unexpected_exception_returns_sanitized_500_problem_details()
     {
         using var factory = new ExceptionApiFactory();
-        using var client = factory.CreateClient();
+        using var client = CreateAdminClient(factory);
 
         using var response = await client.GetAsync(
             "/api/v2/notifications?recipientEmail=unexpected%40example.com");
@@ -64,7 +65,7 @@ public sealed class ApiExceptionContractTests
     public async Task Temporary_capacity_exception_returns_sanitized_503_with_retry_guidance()
     {
         using var factory = new ExceptionApiFactory();
-        using var client = factory.CreateClient();
+        using var client = CreateAdminClient(factory);
 
         using var response = await client.GetAsync(
             "/api/v2/notifications?recipientEmail=unavailable%40example.com");
@@ -89,10 +90,18 @@ public sealed class ApiExceptionContractTests
         return root;
     }
 
-    private sealed class ExceptionApiFactory : WebApplicationFactory<Program>
+    private static HttpClient CreateAdminClient(NsaApiFactory factory)
+    {
+        var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", factory.AdminAccessToken);
+        return client;
+    }
+
+    private sealed class ExceptionApiFactory : NsaApiFactory
     {
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
+            base.ConfigureWebHost(builder);
             builder.UseEnvironment("Testing");
             builder.UseSetting("Database:ApplyMigrationsOnStartup", "false");
             builder.UseSetting("Authentication:Jwt:SigningKey", "test-signing-key-for-notification-api-authentication-12345");

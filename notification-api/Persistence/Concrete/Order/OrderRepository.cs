@@ -51,6 +51,11 @@ public sealed class OrderRepository(NotificationDbContext dbContext) : IOrderRep
         dbContext.Orders.Add(order);
     }
 
+    public void Remove(Order order)
+    {
+        dbContext.Orders.Remove(order);
+    }
+
     public void RemoveCartItems(IEnumerable<CartItem> cartItems)
     {
         dbContext.CartItems.RemoveRange(cartItems);

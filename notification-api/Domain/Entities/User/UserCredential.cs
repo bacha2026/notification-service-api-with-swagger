@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+
 namespace NSA.Domain.Entities;
 
 /// <summary>
@@ -16,6 +18,8 @@ public sealed class UserCredential
     public int FailedAccessCount { get; private set; }
     public DateTimeOffset? LockoutEndUtc { get; private set; }
     public DateTimeOffset? LastLoginAtUtc { get; private set; }
+    public string? PasswordResetTokenHash { get; private set; }
+    public DateTimeOffset? PasswordResetExpiresAtUtc { get; private set; }
     public User? User { get; private set; }
 
     public static UserCredential Create(Guid userId, string email, string passwordHash, DateTimeOffset now)
@@ -83,5 +87,19 @@ public sealed class UserCredential
 
         PasswordHash = passwordHash;
         PasswordChangedAtUtc = now;
+        PasswordResetTokenHash = null;
+        PasswordResetExpiresAtUtc = null;
     }
+
+    public void SetPasswordResetToken(string tokenHash, DateTimeOffset expiresAtUtc)
+    {
+        PasswordResetTokenHash = tokenHash;
+        PasswordResetExpiresAtUtc = expiresAtUtc;
+    }
+
+    public bool HasValidPasswordResetToken(string tokenHash, DateTimeOffset now) =>
+        PasswordResetTokenHash is not null
+        && PasswordResetExpiresAtUtc > now
+        && CryptographicOperations.FixedTimeEquals(
+            Convert.FromHexString(PasswordResetTokenHash), Convert.FromHexString(tokenHash));
 }

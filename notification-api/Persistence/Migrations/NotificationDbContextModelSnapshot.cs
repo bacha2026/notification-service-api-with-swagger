@@ -332,18 +332,6 @@ namespace NSA.Persistence.Migrations
                     b.HasData(
                         new
                         {
-                            Id = 1,
-                            Body = "Order #1 for visitor@example.test. Status: Delivered; Payment: Paid; Fulfillment: AssignedToRider; Delivery: Delivered. Total: PHP 1277.00.",
-                            Channel = "Email",
-                            CreatedAtUtc = new DateTimeOffset(new DateTime(2026, 7, 8, 3, 31, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
-                            IsRead = true,
-                            OrderId = 1,
-                            RecipientEmail = "admin@example.test",
-                            SentAtUtc = new DateTimeOffset(new DateTime(2026, 7, 8, 3, 31, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
-                            Subject = "New order #1"
-                        },
-                        new
-                        {
                             Id = 2,
                             Body = "Your order #1 was received and is now delivered. Total: PHP 1277.00.",
                             Channel = "Email",
@@ -365,18 +353,6 @@ namespace NSA.Persistence.Migrations
                             RecipientEmail = "visitor@example.test",
                             SentAtUtc = new DateTimeOffset(new DateTime(2026, 7, 8, 5, 15, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
                             Subject = "Order #1 status updated"
-                        },
-                        new
-                        {
-                            Id = 4,
-                            Body = "Order #2 for visitor@example.test. Status: Preparing; Payment: Paid; Fulfillment: Packing; Delivery: WaitingForRider. Total: PHP 1398.00.",
-                            Channel = "Email",
-                            CreatedAtUtc = new DateTimeOffset(new DateTime(2026, 7, 9, 1, 46, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
-                            IsRead = false,
-                            OrderId = 2,
-                            RecipientEmail = "admin@example.test",
-                            SentAtUtc = new DateTimeOffset(new DateTime(2026, 7, 9, 1, 46, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
-                            Subject = "New order #2"
                         },
                         new
                         {
@@ -747,6 +723,9 @@ namespace NSA.Persistence.Migrations
                         .HasMaxLength(30)
                         .HasColumnType("nvarchar(30)");
 
+                    b.Property<bool>("IsAdmin")
+                        .HasColumnType("bit");
+
                     b.Property<string>("LastName")
                         .IsRequired()
                         .HasMaxLength(100)
@@ -798,6 +777,14 @@ namespace NSA.Persistence.Migrations
                     b.Property<string>("PasswordHash")
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTimeOffset?>("PasswordResetExpiresAtUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("PasswordResetTokenHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("nchar(64)")
+                        .IsFixedLength();
 
                     b.Property<Guid>("UserId")
                         .HasColumnType("uniqueidentifier");

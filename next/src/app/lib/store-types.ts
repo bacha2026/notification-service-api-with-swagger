@@ -35,10 +35,12 @@ export type OrderItem = {
 export type Order = {
   id: number;
   visitorEmail: string;
-  orderStatus: string;
-  paymentStatus: string;
-  fulfillmentStatus: string;
-  deliveryStatus: string;
+  // The API currently serializes these C# enums as numeric values. Accept
+  // strings as well so the UI remains compatible if the API uses enum names.
+  orderStatus: string | number;
+  paymentStatus: string | number;
+  fulfillmentStatus: string | number;
+  deliveryStatus: string | number;
   totalAmount: number;
   createdAtUtc: string;
   items: OrderItem[];
