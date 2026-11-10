@@ -39,11 +39,12 @@ rollback support, one shared Vault JWT-key scope, and accepted message envelope
 version 1. Mutable tags are rejected by the deployment controller even when a
 digest-pinned record also has friendly tags.
 
-`promote.yml` is a manual workflow pinned to the protected `production-like`
-environment; a dispatcher cannot select a weaker environment. Before downloading
-anything, it fails unless dispatched from `refs/heads/main`, checks out that
-trusted controller branch explicitly, treats both dispatch strings as untrusted
-data, and verifies through
+`promote.yml` and `rollback.yml` are manual entry points that call the shared
+`deploy-release.yml` workflow. The shared job is pinned to the protected
+`production-like` environment; a dispatcher cannot select a weaker environment.
+Before downloading anything, it fails unless dispatched from `refs/heads/main`,
+checks out that trusted controller branch explicitly, treats both dispatch
+strings as untrusted data, and verifies through
 the GitHub API that the selected numeric run belongs to this repository, ran
 `.github/workflows/publish.yml` for the requested 40-character revision, was
 triggered by `push`, and completed successfully. After download, the controller
@@ -52,9 +53,10 @@ GHCR names/digests, and attestation declarations. `gh attestation verify` then
 requires signed provenance from this repository's `publish.yml`, the requested
 source commit, and a GitHub-hosted signer before any registry login or deployment.
 
-`rollback.yml` applies the same run, manifest, and signed-provenance gates before
-the independent rollback path checks the exact prior manifest hash stored at the
-last cutover. Both workflows target a dedicated self-hosted Linux runner labeled
+The shared workflow applies the same run, manifest, and signed-provenance gates
+before invoking the independent promote or rollback script. The rollback path
+checks the exact prior manifest hash stored at the last cutover. Both operations
+target a dedicated self-hosted Linux runner labeled
 `nsa-deployment`; that runner must provide current `gh`, Node.js, Bash, Docker,
 and the other Week 6 prerequisites. It must retain ignored Week 5 Vault material
 and Week 6 deployment state, so checkout deliberately does not clean those
