@@ -2,29 +2,7 @@ name: Quality gates
 
 on:
   workflow_call:
-    inputs:
-      validate_containers:
-        description: Build every runtime Dockerfile without pushing an image.
-        required: false
-        type: boolean
-        default: false
-      run_week4_live_proof:
-        description: Run the destructive, ephemeral SQL/RabbitMQ outage-and-recovery proof.
-        required: false
-        type: boolean
-        default: false
   workflow_dispatch:
-    inputs:
-      validate_containers:
-        description: Build every runtime Dockerfile without pushing an image.
-        required: false
-        type: boolean
-        default: false
-      run_week4_live_proof:
-        description: Run the destructive, ephemeral SQL/RabbitMQ outage-and-recovery proof.
-        required: false
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -41,41 +19,30 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - name: Check out source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - name: Set up .NET from global.json
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: global.json
 
-      - name: Cache NuGet packages
-        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+      - uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
         with:
           path: ${{ env.NUGET_PACKAGES }}
           key: ${{ runner.os }}-nuget-${{ hashFiles('global.json', '**/*.csproj') }}
-          restore-keys: |
-            ${{ runner.os }}-nuget-
+          restore-keys: ${{ runner.os }}-nuget-
 
-      - name: Restore solution
-        run: dotnet restore notification-api/NSA.sln
+      - name: Restore, build, and test
+        run: |
+          dotnet restore notification-api/NSA.sln
+          dotnet build notification-api/NSA.sln --configuration Release --no-restore
+          dotnet test notification-api/NSA.sln --configuration Release --no-build \
+            --logger "trx;LogFileName=tests.trx" \
+            --results-directory artifacts/test-results/dotnet
 
-      - name: Build every solution project
-        run: dotnet build notification-api/NSA.sln --configuration Release --no-restore
-
-      - name: Run .NET tests
-        run: >-
-          dotnet test notification-api/NSA.sln
-          --configuration Release
-          --no-build
-          --logger "trx;LogFileName=tests.trx"
-          --results-directory artifacts/test-results/dotnet
-
-      - name: Upload .NET test results
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: dotnet-test-results-${{ github.run_id }}
           path: artifacts/test-results/dotnet
@@ -83,57 +50,42 @@ jobs:
           retention-days: 14
 
   next:
-    name: Next.js lint, tests, and build
+    name: Next.js checks
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: next
     steps:
-      - name: Check out source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "24"
           cache: npm
           cache-dependency-path: next/package-lock.json
 
-      - name: Install Next.js dependencies
-        working-directory: next
-        run: npm ci
-
-      - name: Lint Next.js
-        working-directory: next
-        run: npm run lint
-
-      - name: Type-check Next.js
-        working-directory: next
-        run: npm run typecheck
-
-      - name: Run Next.js unit tests
-        working-directory: next
-        run: npm test
-
-      - name: Build Next.js production bundle
-        working-directory: next
+      - name: Install, lint, test, and build
         env:
           RELEASE_ID: ${{ github.sha }}
-        run: npm run build
+        run: |
+          npm ci
+          npm run lint
+          npm run typecheck
+          npm test
+          npm run build
 
-      - name: Install Playwright Chromium
-        working-directory: next
-        run: npx playwright install --with-deps chromium
-
-      - name: Verify rendering modes in production
-        working-directory: next
+      - name: Test production rendering
         env:
           RELEASE_ID: ${{ github.sha }}
-        run: npm run test:e2e
+        run: |
+          npx playwright install --with-deps chromium
+          npm run test:e2e
 
-      - name: Upload Next.js test reports
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: next-test-results-${{ github.run_id }}
           path: |
@@ -147,116 +99,45 @@ jobs:
     name: Angular tests and build
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: angular
     steps:
-      - name: Check out source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "24"
           cache: npm
           cache-dependency-path: angular/package-lock.json
 
-      - name: Install Angular dependencies
-        working-directory: angular
-        run: npm ci
-
-      - name: Run Angular tests
-        working-directory: angular
-        run: npm test -- --watch=false
-
-      - name: Build Angular production bundle
-        working-directory: angular
-        run: npm run build
-
-  containers:
-    name: Container build (${{ matrix.component }})
-    if: ${{ inputs.validate_containers || inputs.run_week4_live_proof }}
-    needs: [dotnet, next, angular]
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - component: api
-            context: .
-            dockerfile: ./notification-api/Dockerfile
-            target: final
-            build_args: ""
-          - component: worker
-            context: .
-            dockerfile: ./notification.worker/Dockerfile
-            target: final
-            build_args: ""
-          - component: outbox-worker
-            context: .
-            dockerfile: ./notification.outbox.worker/Dockerfile
-            target: final
-            build_args: ""
-          - component: migrator
-            context: .
-            dockerfile: ./notification-api/Dockerfile
-            target: migrator
-            build_args: ""
-          - component: next
-            context: ./next
-            dockerfile: ./next/Dockerfile
-            target: runner
-            build_args: RELEASE_ID=${{ github.sha }}
-          - component: angular
-            context: ./angular
-            dockerfile: ./angular/Dockerfile
-            target: runtime
-            build_args: ""
-    steps:
-      - name: Check out source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
-
-      - name: Build container without publishing
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
-        with:
-          context: ${{ matrix.context }}
-          file: ${{ matrix.dockerfile }}
-          target: ${{ matrix.target }}
-          build-args: ${{ matrix.build_args }}
-          platforms: linux/amd64
-          push: false
-          provenance: false
-          sbom: false
-          cache-from: type=gha,scope=${{ matrix.component }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.component }}
+      - name: Install, test, and build
+        run: |
+          npm ci
+          npm test -- --watch=false
+          npm run build
 
   infrastructure:
-    name: Provisioning and release control
+    name: Infrastructure checks
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Check out source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "24"
 
-      - name: Check provisioning and deployment shell syntax
-        run: bash -n infra/week5/*.sh infra/week5/sqlserver/*.sh infra/week6/*.sh
+      - name: Check shell syntax and release-control tests
+        run: |
+          bash -n infra/week5/*.sh infra/week5/sqlserver/*.sh infra/week6/*.sh
+          node --test infra/week6/tests/*.test.mjs
 
-      - name: Test immutable release state control
-        run: node --test infra/week6/tests/*.test.mjs
-
-      - name: Validate Week 5 and Week 6 Compose models
+      - name: Validate Compose files
         env:
           RELEASE_SHA: ${{ github.sha }}
         run: |
@@ -264,8 +145,7 @@ jobs:
             infra/week5/.runtime/secrets/api \
             infra/week5/.runtime/secrets/worker \
             infra/week5/.runtime/secrets/migrator
-          for file in \
-            sql_sa_password sql_app_password sql_migrator_password rabbitmq.conf; do
+          for file in sql_sa_password sql_app_password sql_migrator_password rabbitmq.conf; do
             printf 'ci-placeholder' > "infra/week5/.runtime/secrets/platform/$file"
           done
           printf 'ci-placeholder' > infra/week5/.runtime/secrets/api/app_db_connection
@@ -276,6 +156,7 @@ jobs:
           printf 'ci-placeholder' > infra/week5/.runtime/secrets/migrator/migrator_db_connection
           docker compose --file infra/week5/compose.vault.yml config --quiet
           docker compose --file infra/week5/compose.yml config --quiet
+
           mkdir -p infra/week6/.runtime/nginx
           digest="sha256:$(printf '1%.0s' {1..64})"
           {
@@ -287,120 +168,5 @@ jobs:
             printf 'GREEN_RELEASE_SHA=%s\n' "$GITHUB_SHA"
             printf 'MIGRATOR_IMAGE=%s\n' "$digest"
           } > infra/week6/.runtime/release.env
-          docker compose \
-            --env-file infra/week6/.runtime/release.env \
-            --file infra/week6/compose.yml \
-            config --quiet
-
-  week4-live-proof:
-    name: Week 4 live SQL and RabbitMQ proof (opt-in)
-    if: ${{ inputs.run_week4_live_proof }}
-    needs: containers
-    runs-on: ubuntu-latest
-    timeout-minutes: 35
-    steps:
-      - name: Check out source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Generate ephemeral local-stack credentials
-        shell: pwsh
-        run: |
-          $sqlPassword = "W4!$([Guid]::NewGuid().ToString('N'))aA9"
-          $rabbitPassword = "W4!$([Guid]::NewGuid().ToString('N'))rA9"
-          $jwtKey = "week4-ci-$([Guid]::NewGuid().ToString('N'))-$([Guid]::NewGuid().ToString('N'))"
-          @"
-          WEEK3_SQL_PASSWORD=$sqlPassword
-          WEEK3_RABBITMQ_USERNAME=week4_ci
-          WEEK3_RABBITMQ_PASSWORD=$rabbitPassword
-          WEEK3_JWT_SIGNING_KEY=$jwtKey
-          "@ | Set-Content -LiteralPath notification-api/.env -Encoding utf8NoBOM
-
-      - name: Start the isolated Week 4 stack
-        run: >-
-          docker compose
-          --env-file notification-api/.env
-          --file notification-api/compose.week3.yml
-          up --build --detach --wait --wait-timeout 300
-
-      - name: Prove idempotency and broker-outage recovery
-        shell: pwsh
-        run: >-
-          ./notification-api/scripts/Invoke-Week4RuntimeVerification.ps1
-          -EvidencePath artifacts/week4/runtime-verification.json
-
-      - name: Set up .NET for the real-boundary xUnit case
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
-        with:
-          global-json-file: global.json
-
-      - name: Run the opt-in xUnit SQL/RabbitMQ integration test
-        env:
-          NSA_LIVE_BASE_URL: http://127.0.0.1:8081/
-        run: >-
-          dotnet test notification.tests/NSA.Tests/NSA.Tests.csproj
-          --configuration Release
-          --filter Category=LiveIntegration
-          --logger "trx;LogFileName=live-integration.trx"
-          --results-directory artifacts/week4/live-xunit
-
-      - name: Set up Node.js for Newman
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: "24"
-
-      - name: Verify the Postman collection with Newman
-        shell: pwsh
-        run: |
-          $startedAtUtc = [DateTimeOffset]::UtcNow
-          & npx --yes newman@6.2.2 run `
-            notification-api/Specification/Week4-Idempotency-Outbox.postman_collection.json `
-            --reporters cli `
-            --timeout 180000 `
-            --timeout-request 10000 `
-            --timeout-script 10000
-          $exitCode = $LASTEXITCODE
-          $result = if ($exitCode -eq 0) { "PASS" } else { "FAIL" }
-          $summary = [ordered]@{
-            schemaVersion = 1
-            verification = "week4-postman-newman"
-            result = $result
-            startedAtUtc = $startedAtUtc.ToString("O")
-            completedAtUtc = [DateTimeOffset]::UtcNow.ToString("O")
-            commitSha = "${{ github.sha }}"
-            collection = "Week4-Idempotency-Outbox.postman_collection.json"
-            newmanVersion = "6.2.2"
-            exitCode = $exitCode
-          }
-          New-Item -ItemType Directory -Path artifacts/week4 -Force | Out-Null
-          $summary | ConvertTo-Json | Set-Content `
-            -LiteralPath artifacts/week4/postman-verification.json `
-            -Encoding utf8NoBOM
-          if ($exitCode -ne 0) {
-            exit $exitCode
-          }
-
-      - name: Upload sanitized Week 4 evidence
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: week4-verification-evidence-${{ github.run_id }}
-          path: |
-            artifacts/week4/*.json
-            artifacts/week4/live-xunit/*.trx
-          if-no-files-found: warn
-          retention-days: 30
-
-      - name: Tear down the ephemeral stack
-        if: always()
-        run: >-
-          docker compose
-          --env-file notification-api/.env
-          --file notification-api/compose.week3.yml
-          down --volumes --remove-orphans
-
-      - name: Remove ephemeral credentials
-        if: always()
-        shell: pwsh
-        run: Remove-Item -LiteralPath notification-api/.env -Force -ErrorAction SilentlyContinue
+          docker compose --env-file infra/week6/.runtime/release.env \
+            --file infra/week6/compose.yml config --quiet

@@ -9,9 +9,10 @@ neither path builds application images on the target host.
 
 1. Run `bash infra/week5/provision.sh` and leave the Week 5 stateful services
    and workers healthy.
-2. Use a trusted `release-manifest.json` from the publish workflow. It must name
-   exact API, Next, and migrator registry digests and declare rollback/database,
-   JWT, and message-envelope compatibility.
+2. Supply a trusted `release-manifest.json` independently. It must name exact
+   API, Next, and migrator registry digests and declare rollback/database, JWT,
+   and message-envelope compatibility. The GitHub Actions workflow does not
+   create this manifest.
 3. Keep `infra/week5/.runtime` and `infra/week6/.runtime` on the dedicated host.
    The latter is operational state; the former contains secrets and Vault
    recovery material. Neither belongs in Git or CI artifacts.
@@ -108,11 +109,9 @@ Sanitized JSON is stored under `infra/week6/.runtime/evidence/`. It records idle
 checks, the exact observed before/after colors and SHAs, request counts, and any
 failure. It contains no token, account password, secret, or request body.
 
-Local drills append timestamped files to that directory. Protected workflows set
-the validated `RELEASE_EVIDENCE_NAMESPACE` to a unique run/attempt label. The
-release scripts reject an unsafe label or a nonempty run-scoped directory, and
-the workflow uploads only that namespace; evidence from an earlier rehearsal or
-failed workflow cannot be mixed into the current artifact.
+Local drills append timestamped files to that directory. Operators may set
+`RELEASE_EVIDENCE_NAMESPACE` to a unique label; the scripts reject unsafe labels
+and nonempty run-scoped directories.
 
 ```bash
 OBSERVE_SECONDS=30 CUTOVER_PROBE_MILLISECONDS=10000 \
@@ -123,20 +122,13 @@ The stable URL is `http://127.0.0.1:8088`. Nginx emits structured access logs
 with correlation ID, release, status, upstream, and timing. SQL/Outbox/RabbitMQ
 operational checks remain available through the Week 5 stack.
 
-## Controlled CI promotion
+## CI publishing boundary
 
-`publish.yml` builds/tests once, publishes six signed digest-pinned images, and
-attests the combined manifest. Promotion and rollback hard-fail unless their
-manual dispatch runs from `refs/heads/main`, then explicitly check out the main
-deployment controller. `promote.yml` first verifies via the GitHub API
-that the selected run is a successful `publish.yml` push for the same repository
-and revision. It then validates the downloaded manifest metadata and uses
-`gh attestation verify` to bind the file to this repository, signer workflow,
-and source commit before promotion. `rollback.yml` applies the same trust gates
-before invoking the exact-prior rollback path. Both target a dedicated
-self-hosted Linux runner labeled `nsa-deployment`; repository owners must install
-GitHub CLI, Node.js, Bash, and Docker, then configure reviewers and main-only
-deployment-branch restrictions on `production-like` before the workflows execute.
+The GitHub Actions workflow runs quality gates, uploads the .NET and web build
+artifacts, then builds and pushes six images to GHCR. It does not create a
+release manifest or invoke promotion and rollback. The scripts in this folder
+remain available for manual operations and require a separately supplied
+release manifest.
 
 Workers deliberately do not have colors: Nginx cannot route queue delivery.
 Roll Outbox Relay and primary worker separately from their manifest
