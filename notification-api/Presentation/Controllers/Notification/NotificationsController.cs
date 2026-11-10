@@ -138,7 +138,7 @@ public sealed class NotificationsController(INotificationService notificationSer
         CancellationToken cancellationToken)
     {
         await notificationService.DeleteNotificationsForVisitorAsync(
-            request.VisitorEmail,
+            string.Empty,
             cancellationToken);
         return NoContent();
     }
